@@ -1,9 +1,11 @@
+import typing
 import os
 
 from ripser import ripser
 from tqdm import tqdm
 
 import gtda.time_series
+import scipy.sparse
 import pandas as pd
 import numpy as np
 import mne
@@ -81,16 +83,54 @@ class AirflowSignalProcessor:
         for idx, interval in tqdm(target_intervals.iterrows(), total=n_rows):
             interval_start_idx = int(interval.onset * sfreq)
             interval_end_idx = int(interval.end * sfreq)
+
+            # Getting airflow signal
             data_arr = raw_edf.get_data(
                 picks=["Resp Airflow"],
                 start=interval_start_idx,
                 stop=interval_end_idx,
             )
+
+            # TODO: Calculate IRR signal
+            irr_signal = self.get_irr(data_arr, sfreq)
+
+            # Applying TDA to airflow signal
             dgms = self.apply_tda(data_arr, sfreq)
             data.append((dgms, interval.description))
         return
 
-    def apply_tda(self, arr: np.ndarray, sampling_freq: float):
+    def get_irr(self, arr: np.ndarray, samping_freq: float) -> np.ndarray:
+        pass
+
+    def sublevel_set_filtration(self, arr: np.ndarray) -> typing.List[np.ndarray]:
+        """Performs sublevel set filtration based on ripser.
+        Code modified from:
+            https://ripser.scikit-tda.org/en/latest/notebooks/Lower%20Star%20Time%20Series.html
+        """
+        assert len(arr.shape) == 1
+
+        # Add edges between adjacent points in the time series, with the
+        # "distance" along the edge equal to the max value of the points it
+        # connects
+        N = arr.shape[0]
+        I = np.arange(N - 1)
+        J = np.arange(1, N)
+        V = np.maximum(arr[0:-1], arr[1::])
+
+        # Add vertex birth times along the diagonal of the distance matrix
+        I = np.concatenate((I, np.arange(N)))
+        J = np.concatenate((J, np.arange(N)))
+        V = np.concatenate((V, arr))
+
+        # Create the sparse distance matrix
+        D = scipy.sparse.coo_matrix((V, (I, J)), shape=(N, N)).tocsr()
+        dgm0 = ripser(D, maxdim=0, distance_matrix=True)["dgms"][0]
+        dgm0 = dgm0[dgm0[:, 1] - dgm0[:, 0] > 1e-3, :]
+        return [dgm0]
+
+    def rips_filtration(
+        self, arr: np.ndarray, sampling_freq: float
+    ) -> typing.List[np.ndarray]:
         n_seconds = 1
         tau = int(sampling_freq * n_seconds)
         embedder = gtda.time_series.SingleTakensEmbedding(
@@ -99,12 +139,25 @@ class AirflowSignalProcessor:
         )
 
         # Scaling array to have maximum value 1
-        arr = arr / np.abs(arr).max()
+        #  arr = arr / np.abs(arr).max()
+
         embedded_signal = embedder.fit_transform(arr.squeeze())
         dgms = ripser(embedded_signal, n_perm=128)["dgms"]
+        return dgms
 
+    def apply_tda(self, arr: np.ndarray, sampling_freq: float):
+        # Sublevel set filtration
+        sublevel_dgms = self.sublevel_set_filtration(arr.squeeze())
+        sublevel_feats = self.featurize_tda(sublevel_dgms)
+
+        # Time-delay embedding and Rips filtration
+        rips_dgms = self.rips_filtration(arr.squeeze(), sampling_freq)
+        rips_feats = self.featurize_tda(rips_dgms)
+        return
+
+    def featurize_tda(self, dgms: typing.List[np.ndarray]):
+        data = []
         for dgm in dgms:
-            feat = []
             dgm_clean = dgm[~np.isinf(dgm).any(1)]
 
             dm = tda_utils.midlife_persistence(dgm_clean)
@@ -128,7 +181,9 @@ class AirflowSignalProcessor:
             ]
             feat = np.asarray(feat)
             hepc_feat = tda_utils.hepc(dgm_clean)
-        return -1
+            dgm_feat = np.concatenate((feat, hepc_feat), axis=0)
+            data.append(dgm_feat)
+        return data
 
 
 if __name__ == "__main__":
