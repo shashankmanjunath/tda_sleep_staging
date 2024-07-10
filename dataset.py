@@ -5,6 +5,7 @@ from ripser import ripser
 from tqdm import tqdm
 
 import gtda.time_series
+import neurokit2 as nk
 import scipy.sparse
 import pandas as pd
 import numpy as np
@@ -91,22 +92,49 @@ class AirflowSignalProcessor:
                 stop=interval_end_idx,
             )
 
-            # TODO: Calculate IRR signal
+            # Calculate IRR signal
             irr_signal = self.get_irr(data_arr, sfreq)
 
-            # Applying TDA to airflow signal
-            dgms = self.apply_tda(data_arr, sfreq)
+            # Sublevel set filtration of IRR signal
+            sublevel_dgms_irr = self.sublevel_set_filtration(irr_signal)
+            ps_irr = self.persistence_summary(sublevel_dgms_irr[0])
+            hepc_irr = self.hepc(sublevel_dgms_irr[0])
+
+            # Applying time-delay embedding and Rips filtration to airflow
+            # signal
+            rips_dgms_airflow = self.rips_filtration(data_arr, sfreq)
+            hepc_rips_airflow_0 = self.hepc(rips_dgms_airflow[0])
+            ps_rips_airflow_1 = self.persistence_summary(rips_dgms_airflow[1])
+
+            # Sublevel set filtration of airflow signal
+            sublevel_dgms_airflow = self.sublevel_set_filtration(data_arr)
+            hepc_sub_airflow_0 = self.hepc(sublevel_dgms_airflow[0])
+            ps_sub_airflow_0 = self.persistence_summary(sublevel_dgms_airflow[0])
+
+            feat_arr = [
+                ps_sub_airflow_0,
+                hepc_sub_airflow_0,
+                hepc_rips_airflow_0,
+                ps_rips_airflow_1,
+                ps_irr,
+                hepc_irr,
+            ]
+
             data.append((dgms, interval.description))
         return
 
-    def get_irr(self, arr: np.ndarray, samping_freq: float) -> np.ndarray:
-        pass
+    def get_irr(self, arr: np.ndarray, sampling_freq: float) -> np.ndarray:
+        clean_arr = nk.rsp_clean(arr.squeeze(), sampling_rate=sampling_freq)
+        df, peaks = nk.rsp_peaks(clean_arr)
+        rsp_rate = nk.rsp_rate(clean_arr, peaks, sampling_rate=sampling_freq)
+        return rsp_rate
 
     def sublevel_set_filtration(self, arr: np.ndarray) -> typing.List[np.ndarray]:
         """Performs sublevel set filtration based on ripser.
         Code modified from:
             https://ripser.scikit-tda.org/en/latest/notebooks/Lower%20Star%20Time%20Series.html
         """
+        arr = arr.squeeze()
         assert len(arr.shape) == 1
 
         # Add edges between adjacent points in the time series, with the
@@ -145,45 +173,35 @@ class AirflowSignalProcessor:
         dgms = ripser(embedded_signal, n_perm=128)["dgms"]
         return dgms
 
-    def apply_tda(self, arr: np.ndarray, sampling_freq: float):
-        # Sublevel set filtration
-        sublevel_dgms = self.sublevel_set_filtration(arr.squeeze())
-        sublevel_feats = self.featurize_tda(sublevel_dgms)
+    def persistence_summary(self, dgm: np.ndarray):
+        dgm_clean = dgm[~np.isinf(dgm).any(1)]
 
-        # Time-delay embedding and Rips filtration
-        rips_dgms = self.rips_filtration(arr.squeeze(), sampling_freq)
-        rips_feats = self.featurize_tda(rips_dgms)
-        return
+        dm = tda_utils.midlife_persistence(dgm_clean)
+        dl = tda_utils.lifespan_persistence(dgm_clean)
 
-    def featurize_tda(self, dgms: typing.List[np.ndarray]):
-        data = []
-        for dgm in dgms:
-            dgm_clean = dgm[~np.isinf(dgm).any(1)]
+        feat = [
+            # Midlife persistence
+            tda_utils.mean_pers(dm),
+            tda_utils.std_pers(dm),
+            tda_utils.skew_pers(dm),
+            tda_utils.kurt_pers(dm),
+            tda_utils.entr_pers_midlife(dgm_clean),
+            # Lifespan persistence
+            tda_utils.mean_pers(dl),
+            tda_utils.std_pers(dl),
+            tda_utils.skew_pers(dl),
+            tda_utils.kurt_pers(dl),
+            tda_utils.entr_pers_lifespan(dgm_clean),
+            # 1-norm of Gaussian persistence curve
+            tda_utils.gaussian_persistence_curve(dgm_clean, sigma=1.0),
+        ]
+        feat = np.asarray(feat)
+        return feat
 
-            dm = tda_utils.midlife_persistence(dgm_clean)
-            dl = tda_utils.lifespan_persistence(dgm_clean)
-
-            feat = [
-                # Midlife persistence
-                tda_utils.mean_pers(dm),
-                tda_utils.std_pers(dm),
-                tda_utils.skew_pers(dm),
-                tda_utils.kurt_pers(dm),
-                tda_utils.entr_pers_midlife(dgm_clean),
-                # Lifespan persistence
-                tda_utils.mean_pers(dl),
-                tda_utils.std_pers(dl),
-                tda_utils.skew_pers(dl),
-                tda_utils.kurt_pers(dl),
-                tda_utils.entr_pers_lifespan(dgm_clean),
-                # 1-norm of Gaussian persistence curve
-                tda_utils.gaussian_persistence_curve(dgm_clean, sigma=1.0),
-            ]
-            feat = np.asarray(feat)
-            hepc_feat = tda_utils.hepc(dgm_clean)
-            dgm_feat = np.concatenate((feat, hepc_feat), axis=0)
-            data.append(dgm_feat)
-        return data
+    def hepc(self, dgm: np.ndarray) -> np.ndarray:
+        dgm_clean = dgm[~np.isinf(dgm).any(1)]
+        hepc_feat = tda_utils.hepc(dgm_clean)
+        return hepc_feat
 
 
 if __name__ == "__main__":
