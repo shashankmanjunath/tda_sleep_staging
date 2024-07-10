@@ -38,6 +38,7 @@ class AirflowSignalProcessor:
         ]
 
         self.d = 3
+        self.target_resamp_rate = 4
 
         if not os.path.exists(self.edf_fname):
             raise RuntimeError("EDF file for patient id not found!")
@@ -81,7 +82,8 @@ class AirflowSignalProcessor:
         n_rows = target_intervals.shape[0]
 
         data = []
-        for idx, interval in tqdm(target_intervals.iterrows(), total=n_rows):
+        pbar = tqdm(target_intervals.iterrows(), total=n_rows)
+        for idx, (_, interval) in enumerate(pbar):
             interval_start_idx = int(interval.onset * sfreq)
             interval_end_idx = int(interval.end * sfreq)
 
@@ -97,6 +99,11 @@ class AirflowSignalProcessor:
 
             # Sublevel set filtration of IRR signal
             sublevel_dgms_irr = self.sublevel_set_filtration(irr_signal)
+
+            # Skipping if we have very few points in filtration
+            #  if sublevel_dgms_irr[0].shape[0] < 2:
+            #      continue
+
             ps_irr = self.persistence_summary(sublevel_dgms_irr[0])
             hepc_irr = self.hepc(sublevel_dgms_irr[0])
 
@@ -119,15 +126,44 @@ class AirflowSignalProcessor:
                 ps_irr,
                 hepc_irr,
             ]
-
-            data.append((dgms, interval.description))
+            feat = np.concatenate(feat_arr, axis=0)
+            data.append((feat, interval))
         return
 
     def get_irr(self, arr: np.ndarray, sampling_freq: float) -> np.ndarray:
-        clean_arr = nk.rsp_clean(arr.squeeze(), sampling_rate=sampling_freq)
-        df, peaks = nk.rsp_peaks(clean_arr)
+        #  clean_arr = nk.rsp_clean(arr.squeeze(), sampling_rate=sampling_freq)
+        clean_arr = self.clean_rsp_signal(arr.squeeze(), sampling_rate=sampling_freq)
+        _, peaks = nk.rsp_peaks(clean_arr)
         rsp_rate = nk.rsp_rate(clean_arr, peaks, sampling_rate=sampling_freq)
-        return rsp_rate
+
+        T = arr.shape[-1] / sampling_freq
+        n_samp = int(T * self.target_resamp_rate)
+
+        # Resampling to 4 Hz
+        rsp_resamp = scipy.signal.resample(rsp_rate, num=n_samp)
+        return rsp_resamp
+
+    def clean_rsp_signal(self, arr: np.ndarray, sampling_rate: float) -> np.ndarray:
+        """Custom function to clean respiratory signal following paper
+        implementation"""
+        assert len(arr.shape) == 1
+
+        # Linear detrend of signal
+        detrend_arr = scipy.signal.detrend(arr, type="linear")
+
+        # 2Hz 5th order butterworth low pass filter
+        sos_arr = scipy.signal.butter(
+            N=5,
+            Wn=2,
+            btype="lowpass",
+            output="sos",
+            fs=sampling_rate,
+        )
+        clean_arr = scipy.signal.sosfilt(sos_arr, detrend_arr)
+        return clean_arr
+
+    def signal_quality_check(self, arr: np.ndarray, sampling_freq: float) -> np.ndarray:
+        pass
 
     def sublevel_set_filtration(self, arr: np.ndarray) -> typing.List[np.ndarray]:
         """Performs sublevel set filtration based on ripser.
@@ -153,7 +189,7 @@ class AirflowSignalProcessor:
         # Create the sparse distance matrix
         D = scipy.sparse.coo_matrix((V, (I, J)), shape=(N, N)).tocsr()
         dgm0 = ripser(D, maxdim=0, distance_matrix=True)["dgms"][0]
-        dgm0 = dgm0[dgm0[:, 1] - dgm0[:, 0] > 1e-3, :]
+        #  dgm0 = dgm0[dgm0[:, 1] - dgm0[:, 0] > 1e-3, :]
         return [dgm0]
 
     def rips_filtration(

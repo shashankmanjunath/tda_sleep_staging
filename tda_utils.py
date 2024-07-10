@@ -40,6 +40,9 @@ def entr_pers_midlife(dgms: np.ndarray) -> float:
     pers_arr_p = dgms[:, 1] + dgms[:, 0]
     pers_arr_n = dgms[:, 1] - dgms[:, 0]
 
+    # Correcting for small errors in calculation
+    pers_arr_p[pers_arr_p < 0] = 0.0
+
     M = np.sum(pers_arr_p)
     return -np.sum((pers_arr_p / M) * np.log(pers_arr_n / M))
 
