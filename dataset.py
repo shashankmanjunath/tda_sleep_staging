@@ -2,6 +2,7 @@ import typing
 import os
 
 from ripser import ripser
+from fire import Fire
 from tqdm import tqdm
 
 import gtda.time_series
@@ -9,6 +10,8 @@ import neurokit2 as nk
 import scipy.sparse
 import pandas as pd
 import numpy as np
+import cripser
+import h5py
 import mne
 
 import tda_utils
@@ -112,9 +115,11 @@ class EpochCache:
 
 
 class AirflowSignalProcessor:
-    def __init__(self, pt_id: str, data_dir: str):
+    def __init__(self, pt_id: str, data_dir: str, save_fname: str):
         self.pt_id = pt_id
         self.data_dir = data_dir
+        self.save_fname = save_fname
+
         self.edf_fname = os.path.join(self.data_dir, "sleep_data", f"{self.pt_id}.edf")
         self.tsv_fname = os.path.join(self.data_dir, "sleep_data", f"{self.pt_id}.tsv")
 
@@ -184,7 +189,7 @@ class AirflowSignalProcessor:
         # Running epochs for signal quality index calculation
         epoch_cache = EpochCache(self.n_epochs_sqi, sampling_freq=sfreq)
 
-        pbar = tqdm(target_intervals.iterrows(), total=n_rows)
+        pbar = tqdm(target_intervals.iterrows(), total=n_rows, desc=self.pt_id)
         for idx, (_, interval) in enumerate(pbar):
             interval_start_idx = int(interval.onset * sfreq)
             interval_end_idx = int(interval.end * sfreq)
@@ -245,6 +250,21 @@ class AirflowSignalProcessor:
             ]
             feat = np.concatenate(feat_arr, axis=0)
             data.append((feat, interval))
+
+        feat_arr = np.stack([x[0] for x in data])
+        label_df = pd.concat([x[1] for x in data], axis=1).T
+        label_df = label_df.drop("interval", axis=1)
+
+        # Converting types
+        label_df["onset"] = label_df["onset"].astype(float)
+        label_df["duration"] = label_df["duration"].astype(float)
+        label_df["description"] = label_df["description"].astype(str)
+        label_df["end"] = label_df["end"].astype(str)
+
+        with h5py.File(self.save_fname, "a") as f:
+            pt_group = f.create_group(self.pt_id)
+            pt_group.create_dataset("tda_feature", data=feat_arr)
+        label_df.to_hdf(self.save_fname, key=f"{self.pt_id}/tda_label")
         return
 
     def get_irr(self, arr: np.ndarray, sampling_freq: float) -> np.ndarray:
@@ -285,9 +305,6 @@ class AirflowSignalProcessor:
         clean_arr = scipy.signal.sosfilt(sos_arr, detrend_arr)
         return clean_arr
 
-    def signal_quality_check(self, arr: np.ndarray, sampling_freq: float) -> np.ndarray:
-        pass
-
     def sublevel_set_filtration(self, arr: np.ndarray) -> typing.List[np.ndarray]:
         """Performs sublevel set filtration based on ripser.
         Code modified from:
@@ -296,23 +313,13 @@ class AirflowSignalProcessor:
         arr = arr.squeeze()
         assert len(arr.shape) == 1
 
-        # Add edges between adjacent points in the time series, with the
-        # "distance" along the edge equal to the max value of the points it
-        # connects
-        N = arr.shape[0]
-        I = np.arange(N - 1)
-        J = np.arange(1, N)
-        V = np.maximum(arr[0:-1], arr[1::])
+        pd = cripser.computePH(arr, maxdim=0)
+        dgm0 = pd[:, 1:3]
 
-        # Add vertex birth times along the diagonal of the distance matrix
-        I = np.concatenate((I, np.arange(N)))
-        J = np.concatenate((J, np.arange(N)))
-        V = np.concatenate((V, arr))
+        # Since we only do 0th diagram, last death in diagram is inf. Changing
+        # to inf for easy downstream processing
+        dgm0[-1, -1] = np.inf
 
-        # Create the sparse distance matrix
-        D = scipy.sparse.coo_matrix((V, (I, J)), shape=(N, N)).tocsr()
-        dgm0 = ripser(D, maxdim=0, distance_matrix=True)["dgms"][0]
-        #  dgm0 = dgm0[dgm0[:, 1] - dgm0[:, 0] > 1e-3, :]
         return [dgm0]
 
     def rips_filtration(
@@ -372,9 +379,20 @@ def process_idx(idx):
             pt_ids.append(pt_file.replace(".edf", ""))
 
     pt_id = pt_ids[idx]
-    loader = AirflowSignalProcessor(pt_id=pt_id, data_dir=data_dir)
+
+    save_dir = "/work/thesathlab/manjunath.sh/tda_sleep_staging/"
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+
+    save_fname = os.path.join(save_dir, "tda_sleep_staging.hdf5")
+
+    loader = AirflowSignalProcessor(
+        pt_id=pt_id,
+        data_dir=data_dir,
+        save_fname=save_fname,
+    )
     loader.process()
 
 
 if __name__ == "__main__":
-    process_idx(0)
+    Fire(process_idx)
