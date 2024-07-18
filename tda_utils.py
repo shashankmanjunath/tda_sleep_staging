@@ -71,22 +71,34 @@ def psi(dgms: np.ndarray) -> float:
 
 def hepc(dgms: np.ndarray) -> np.ndarray:
     """Calculates the Hermite function expancsion of persistence curve (HEPC)"""
+    b = dgms[:, 0]
+    d = dgms[:, 1]
+    psi_dgms = psi(dgms)
+
     rv_gen = scipy.stats.norm()
-    rv_val_cdf = rv_gen.cdf(dgms[:, 1]) - rv_gen.cdf(dgms[:, 0])
-    rv_val_pdf = rv_gen.pdf(dgms[:, 1]) - rv_gen.pdf(dgms[:, 0])
+    rv_val_cdf_db = rv_gen.cdf(d) - rv_gen.cdf(b)
+    rv_val_pdf_bd = rv_gen.pdf(b) - rv_gen.pdf(d)
 
     coeff = np.sqrt(2) * np.power(np.pi, 0.25)
     alpha = []
-    alpha.append(np.sum(coeff * psi(dgms) * rv_val_cdf))
-    alpha.append(np.sum(coeff * psi(dgms) * rv_val_pdf))
+    alpha.append(np.sum(coeff * psi_dgms * rv_val_cdf_db))
+    alpha.append(np.sum(coeff * psi_dgms * rv_val_pdf_bd))
 
     for n in range(2, 15):
-        coeff_i = np.sqrt(2) / np.sqrt(n + 1)
-        const_i = (n * alpha[-1]) / np.sqrt(n * (n + 1))
+        # Indexing starts from 1 before current n
+        n_index = n - 1
 
-        hfunc = scipy.special.hermite(n)
-        hdiff = hfunc(dgms[:, 1]) - hfunc(dgms[:, 0])
-        val_i = psi(dgms) * hdiff
+        coeff_i = np.sqrt(2) / np.sqrt(n_index + 1)
+        const_i = (n_index * alpha[n_index - 1]) / np.sqrt(n_index * (n_index + 1))
+
+        hfunc = scipy.special.hermite(n_index)
+        #  hdiff = hfunc(b) - hfunc(d)
+
+        # NOTE: This multiplication by the Gaussian PDF is found in the code,
+        # but not in the paper. I have included it since it fixes some scaling
+        # issues.
+        hdiff = rv_gen.pdf(b) * hfunc(b) - rv_gen.pdf(d) * hfunc(d)
+        val_i = psi_dgms * hdiff
 
         alpha.append((coeff_i * np.sum(val_i)) + const_i)
     alpha = np.asarray(alpha)

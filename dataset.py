@@ -115,10 +115,11 @@ class EpochCache:
 
 
 class AirflowSignalProcessor:
-    def __init__(self, pt_id: str, data_dir: str, save_fname: str):
+    def __init__(self, pt_id: str, data_dir: str, save_dir: str):
         self.pt_id = pt_id
         self.data_dir = data_dir
-        self.save_fname = save_fname
+        self.save_dir = save_dir
+        self.save_fname = os.path.join(self.save_dir, f"{pt_id}.hdf5")
 
         self.edf_fname = os.path.join(self.data_dir, "sleep_data", f"{self.pt_id}.edf")
         self.tsv_fname = os.path.join(self.data_dir, "sleep_data", f"{self.pt_id}.tsv")
@@ -197,6 +198,7 @@ class AirflowSignalProcessor:
             # Getting airflow signal
             cur_epoch = raw_edf.get_data(
                 picks=["Resp Airflow"],
+                #  picks=["Resp PTAF"],
                 start=interval_start_idx,
                 stop=interval_end_idx,
             )
@@ -210,8 +212,8 @@ class AirflowSignalProcessor:
             sqi = epoch_cache.get_sqi()
 
             if sqi < 0.25:
-                print(f"Skipping {idx}, SQI: {sqi}")
                 # SQI is too low, reject epoch
+                #  print(f"Skipping {idx}, SQI: {sqi}")
                 continue
 
             data_arr = epoch_cache.get_epoch_sequence()
@@ -228,6 +230,8 @@ class AirflowSignalProcessor:
 
             ps_irr = self.persistence_summary(sublevel_dgms_irr[0])
             hepc_irr = self.hepc(sublevel_dgms_irr[0])
+
+            # Noted issue: 14869_23599 (idx 1041)
 
             # Applying time-delay embedding and Rips filtration to airflow
             # signal
@@ -262,9 +266,8 @@ class AirflowSignalProcessor:
         label_df["end"] = label_df["end"].astype(str)
 
         with h5py.File(self.save_fname, "a") as f:
-            pt_group = f.create_group(self.pt_id)
-            pt_group.create_dataset("tda_feature", data=feat_arr)
-        label_df.to_hdf(self.save_fname, key=f"{self.pt_id}/tda_label")
+            f.create_dataset("tda_feature", data=feat_arr)
+        label_df.to_hdf(self.save_fname, key=f"tda_label")
         return
 
     def get_irr(self, arr: np.ndarray, sampling_freq: float) -> np.ndarray:
@@ -379,17 +382,16 @@ def process_idx(idx):
             pt_ids.append(pt_file.replace(".edf", ""))
 
     pt_id = pt_ids[idx]
+    #  pt_id = "7612_21985"
 
     save_dir = "/work/thesathlab/manjunath.sh/tda_sleep_staging/"
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
 
-    save_fname = os.path.join(save_dir, "tda_sleep_staging.hdf5")
-
     loader = AirflowSignalProcessor(
         pt_id=pt_id,
         data_dir=data_dir,
-        save_fname=save_fname,
+        save_dir=save_dir,
     )
     loader.process()
 
