@@ -1,4 +1,5 @@
 import typing
+import time
 import os
 
 from ripser import ripser
@@ -116,6 +117,7 @@ class EpochCache:
 
 class AirflowSignalProcessor:
     def __init__(self, pt_id: str, data_dir: str, save_dir: str):
+        # TODO: Screen for OSA
         self.pt_id = pt_id
         self.data_dir = data_dir
         self.save_dir = save_dir
@@ -123,6 +125,9 @@ class AirflowSignalProcessor:
 
         self.edf_fname = os.path.join(self.data_dir, "sleep_data", f"{self.pt_id}.edf")
         self.tsv_fname = os.path.join(self.data_dir, "sleep_data", f"{self.pt_id}.tsv")
+        self.study_data = pd.read_csv(
+            os.path.join(self.data_dir, "health_data", "SLEEP_STUDY.csv")
+        )
 
         self.sleep_stage_kw = [
             "sleep stage w",
@@ -148,6 +153,39 @@ class AirflowSignalProcessor:
             raise RuntimeError("EDF file for patient id not found!")
         elif not os.path.exists(self.tsv_fname):
             raise RuntimeError("TSV file for patient id not found!")
+
+    def load_pt_study_metadata(self) -> pd.DataFrame:
+        self.study_data["STUDY_PAT_ID"] = self.study_data["STUDY_PAT_ID"].astype(str)
+        self.study_data["SLEEP_STUDY_ID"] = self.study_data["SLEEP_STUDY_ID"].astype(
+            str
+        )
+        self.study_data["PT_ID"] = self.study_data[
+            ["STUDY_PAT_ID", "SLEEP_STUDY_ID"]
+        ].agg("_".join, axis=1)
+        pt_study_data = self.study_data[self.study_data["PT_ID"] == self.pt_id]
+
+        if pt_study_data.shape[0] > 1:
+            raise RuntimeError("Too many sleep studies found!")
+        return pt_study_data
+
+    def get_ahi(self) -> float:
+        pt_study_data = self.load_pt_study_metadata()
+        study_duration = pt_study_data["SLEEP_STUDY_DURATION_DATETIME"].item().strip()
+
+        tm = time.strptime(study_duration, "%H:%M:%S")
+        study_dur_h = tm.tm_hour + (tm.tm_min / 60) + (tm.tm_sec / 3600)
+
+        raw_tsv = pd.read_csv(self.tsv_fname, sep="\t")
+        raw_tsv["description"] = raw_tsv["description"].apply(lambda x: x.lower())
+        event_list = raw_tsv["description"].to_list()
+        events = [x for x in event_list if "apnea" in x or "hypopnea" in x]
+        ahi = len(events) / study_dur_h
+        return ahi
+
+    def get_age(self):
+        pt_study_data = self.load_pt_study_metadata()
+        age = pt_study_data["AGE_AT_SLEEP_STUDY_DAYS"].item() / 365
+        return age
 
     def find_target_intervals(self):
         raw_tsv = pd.read_csv(self.tsv_fname, sep="\t")
@@ -179,7 +217,7 @@ class AirflowSignalProcessor:
         return sleep_stage_tsv
 
     def process(self):
-        raw_edf = mne.io.read_raw_edf(self.edf_fname)
+        raw_edf = mne.io.read_raw_edf(self.edf_fname, verbose=False)
         sfreq = raw_edf.info["sfreq"]
 
         target_intervals = self.find_target_intervals()
@@ -188,7 +226,8 @@ class AirflowSignalProcessor:
         data = []
 
         # Running epochs for signal quality index calculation
-        epoch_cache = EpochCache(self.n_epochs_sqi, sampling_freq=sfreq)
+        airflow_cache = EpochCache(self.n_epochs_sqi, sampling_freq=sfreq)
+        resp_rate_cache = EpochCache(self.n_epochs_sqi, sampling_freq=sfreq)
 
         pbar = tqdm(target_intervals.iterrows(), total=n_rows, desc=self.pt_id)
         for idx, (_, interval) in enumerate(pbar):
@@ -196,30 +235,42 @@ class AirflowSignalProcessor:
             interval_end_idx = int(interval.end * sfreq)
 
             # Getting airflow signal
-            cur_epoch = raw_edf.get_data(
-                picks=["Resp Airflow"],
-                #  picks=["Resp PTAF"],
+            cur_airflow = raw_edf.get_data(
+                #  picks=["Resp Airflow"],
+                picks=["Resp PTAF"],
+                start=interval_start_idx,
+                stop=interval_end_idx,
+            )
+            cur_resp_rate = raw_edf.get_data(
+                picks=["Resp Rate"],
                 start=interval_start_idx,
                 stop=interval_end_idx,
             )
 
-            epoch_cache.add_epoch(
-                cur_epoch,
+            airflow_cache.add_epoch(
+                cur_airflow,
                 t_start=interval["onset"],
                 t_len=interval["duration"],
             )
 
-            sqi = epoch_cache.get_sqi()
+            resp_rate_cache.add_epoch(
+                cur_resp_rate,
+                t_start=interval["onset"],
+                t_len=interval["duration"],
+            )
+
+            sqi = airflow_cache.get_sqi()
 
             if sqi < 0.25:
                 # SQI is too low, reject epoch
                 #  print(f"Skipping {idx}, SQI: {sqi}")
                 continue
 
-            data_arr = epoch_cache.get_epoch_sequence()
+            data_arr = airflow_cache.get_epoch_sequence()
 
             # Calculate IRR signal
-            irr_signal = self.get_irr(data_arr, sfreq)
+            #  irr_signal = self.get_irr(data_arr, sfreq)
+            irr_signal = resp_rate_cache.get_epoch_sequence()
 
             # Sublevel set filtration of IRR signal
             sublevel_dgms_irr = self.sublevel_set_filtration(irr_signal)
@@ -270,7 +321,8 @@ class AirflowSignalProcessor:
         label_df.to_hdf(self.save_fname, key=f"tda_label")
         return
 
-    def get_irr(self, arr: np.ndarray, sampling_freq: float) -> np.ndarray:
+    def calc_irr(self, arr: np.ndarray, sampling_freq: float) -> np.ndarray:
+        # TODO: Just use resp rate channel
         #  clean_arr = nk.rsp_clean(arr.squeeze(), sampling_rate=sampling_freq)
         clean_arr = self.clean_rsp_signal(arr.squeeze(), sampling_rate=sampling_freq)
         _, peaks = nk.rsp_peaks(
@@ -384,7 +436,7 @@ def process_idx(idx):
     pt_id = pt_ids[idx]
     #  pt_id = "7612_21985"
 
-    save_dir = "/work/thesathlab/manjunath.sh/tda_sleep_staging/"
+    save_dir = "/work/thesathlab/manjunath.sh/tda_sleep_staging_ptaf/"
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
 
@@ -393,7 +445,20 @@ def process_idx(idx):
         data_dir=data_dir,
         save_dir=save_dir,
     )
-    loader.process()
+    subject_ahi = loader.get_ahi()
+    subject_age = loader.get_age()
+
+    if (subject_ahi < 1) and (subject_age >= 2) and (subject_age < 18):
+        loader.process()
+    else:
+        if subject_ahi < 1:
+            print("Subject AHI too low!")
+
+        if subject_age < 2:
+            print("Subject age too low!")
+
+        if subject_age >= 18:
+            print("Subject age too high!")
 
 
 if __name__ == "__main__":

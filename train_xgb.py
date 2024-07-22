@@ -6,65 +6,23 @@ from fire import Fire
 from tqdm import tqdm
 
 import sklearn.model_selection
-import pandas as pd
 import numpy as np
 import sklearn
-import h5py
 
 import utils
 
 
-ORDINAL_MAP = {
-    "sleep stage w": 0,
-    "sleep stage n1": 1,
-    "sleep stage n2": 2,
-    "sleep stage n3": 3,
-    "sleep stage r": 4,
-}
-
-
-def identity_map(sample: str) -> int:
-    return ORDINAL_MAP[sample]
-
-
-def sleep_wake_map(sample: str) -> int:
-    if sample == "sleep stage w":
-        return 0
-    return 1
-
-
-def wake_nrem_rem_map(sample: str) -> int:
-    if sample == "sleep stage w":
-        return 0
-    elif sample == "sleep stage r":
-        return 2
-    return 1
-
-
-def load_data(fnames_list: typing.List[str]) -> typing.Tuple[dict, dict]:
-    data = {}
-    label = {}
-    for fname in tqdm(fnames_list):
-        fname_label = pd.read_hdf(fname, key="tda_label")
-        label_arr = fname_label["description"].to_numpy()
-        with h5py.File(fname, "r") as f:
-            # Loading data
-            data_arr = f["tda_feature"][()]
-        # Removing nan data
-        data_arr_corr, label_arr_corr = utils.drop_nan_rows(data_arr, label_arr)
-        label[fname] = label_arr_corr
-        data[fname] = data_arr_corr
-    return data, label
-
-
 def train(data_dir: str):
     subject_fnames = os.listdir(data_dir)
-    #  subject_fnames = subject_fnames[:25]
 
     all_paths = np.asarray([os.path.join(data_dir, x) for x in subject_fnames])
-    all_data, all_label = load_data(all_paths)
+    all_demos = utils.get_demographics(
+        all_paths,
+        data_dir="/work/thesathlab/nchsdb/",
+    )
+    all_data, all_label = utils.load_data(all_paths)
 
-    map_type = wake_nrem_rem_map
+    map_type = utils.wake_nrem_rem_map
     for k, v in all_label.items():
         all_label[k] = np.asarray(list(map(map_type, v)))
 
@@ -83,7 +41,13 @@ def train(data_dir: str):
     )
 
     n_splits = 5
-    kf = sklearn.model_selection.KFold(
+    #  kf = sklearn.model_selection.KFold(
+    #      n_splits=n_splits,
+    #      random_state=2024,
+    #      shuffle=True,
+    #  )
+
+    kf = sklearn.model_selection.StratifiedKFold(
         n_splits=n_splits,
         random_state=2024,
         shuffle=True,
@@ -93,10 +57,13 @@ def train(data_dir: str):
     test_ba_arr = []
     train_acc_arr = []
     test_acc_arr = []
+    train_cmat_arr = []
+    test_cmat_arr = []
 
-    # TODO: Ensure proper splitting of data from each subject
+    strat_label = [all_demos[x] for x in all_paths]
     for idx, (train_idx, test_idx) in enumerate(
-        tqdm(kf.split(all_paths), total=n_splits)
+        #  tqdm(kf.split(all_paths), total=n_splits)
+        tqdm(kf.split(all_paths, strat_label), total=n_splits)
     ):
         train_fnames = all_paths[train_idx]
         test_fnames = all_paths[test_idx]
@@ -130,10 +97,6 @@ def train(data_dir: str):
         train_data = scaler.transform(train_data)
         test_data = scaler.transform(test_data)
 
-        #  sample_weights = sklearn.utils.class_weight.compute_sample_weight(
-        #      class_weight={0: 4, 1: 1, 2: 4},
-        #      y=train_label,
-        #  )
         sample_weights = sklearn.utils.class_weight.compute_sample_weight(
             class_weight="balanced",
             y=train_label,
@@ -153,24 +116,26 @@ def train(data_dir: str):
         train_cmat = sklearn.metrics.confusion_matrix(train_label, train_pred)
         test_cmat = sklearn.metrics.confusion_matrix(test_label, test_pred)
 
-        train_class_acc = train_cmat.diagonal() / train_cmat.sum(axis=1)
-        test_class_acc = test_cmat.diagonal() / test_cmat.sum(axis=1)
+        train_cmat_arr.append(train_cmat)
+        test_cmat_arr.append(test_cmat)
 
-        print(train_class_acc)
-        print(test_class_acc)
+        #  train_class_acc = train_cmat.diagonal() / train_cmat.sum(axis=1)
+        #  test_class_acc = test_cmat.diagonal() / test_cmat.sum(axis=1)
+        #  print(train_class_acc)
+        #  print(test_class_acc)
 
         train_ba_arr.append(train_ba)
         test_ba_arr.append(test_ba)
         train_acc_arr.append(train_acc)
         test_acc_arr.append(test_acc)
 
-        print(f"Train Balanced Accuracy: {train_ba:.3f}")
-        print(f"Test Balanced Accuracy: {test_ba:.3f}")
-        print()
-
-        print(f"Train Accuracy: {train_acc:.3f}")
-        print(f"Test Accuracy: {test_acc:.3f}")
-        print()
+        #  print(f"Train Balanced Accuracy: {train_ba:.3f}")
+        #  print(f"Test Balanced Accuracy: {test_ba:.3f}")
+        #  print()
+        #
+        #  print(f"Train Accuracy: {train_acc:.3f}")
+        #  print(f"Test Accuracy: {test_acc:.3f}")
+        #  print()
 
     print(f"{n_splits}-fold validation:")
     print_result("Train Balanced Accuracy", train_ba_arr)
@@ -178,13 +143,22 @@ def train(data_dir: str):
     print_result("Train Accuracy", train_acc_arr)
     print_result("Test Accuracy", test_acc_arr)
 
-    #  print(f"Train Balanced Accuracy: {np.mean(train_ba_arr):.3f}")
-    #  print(f"Test Balanced Accuracy: {np.mean(test_ba_arr):.3f}")
-    #  print()
-    #
-    #  print(f"Train Accuracy: {np.mean(train_acc_arr):.3f}")
-    #  print(f"Test Accuracy: {np.mean(test_acc_arr):.3f}")
-    #  print()
+    print()
+
+    avg_train_cmat = np.stack(train_cmat_arr).mean(0)
+    avg_test_cmat = np.stack(test_cmat_arr).mean(0)
+    train_class_acc = avg_train_cmat.diagonal() / avg_train_cmat.sum(axis=1)
+    test_class_acc = avg_test_cmat.diagonal() / avg_test_cmat.sum(axis=1)
+
+    print("Average Train Confusion Matrix")
+    print(avg_train_cmat)
+    print()
+    print(train_class_acc)
+
+    print("Average Test Confusion Matrix")
+    print(avg_test_cmat)
+    print()
+    print(test_class_acc)
 
 
 def print_result(key, arr):
