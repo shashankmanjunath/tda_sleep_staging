@@ -5,7 +5,13 @@ from tqdm import tqdm
 
 import pandas as pd
 import numpy as np
+import scipy
 import h5py
+
+
+def iqr(x):
+    q75, q25 = np.percentile(x, [75, 25])
+    return q75 - q25
 
 
 def drop_nan_rows(
@@ -100,3 +106,40 @@ def get_demographics(subject_list: typing.List[str], data_dir: str) -> dict:
 
         demo_output[pt_fname] = f"{int(age)}_{sex}"
     return demo_output
+
+
+def calculate_sqi(epoch_data: np.ndarray, sampling_freq: float) -> float:
+    bp_lo_freq = 0.1
+    bp_hi_freq = 0.75
+    freq_spread = 4
+
+    sos_butter_bandpass = scipy.signal.butter(
+        N=3,
+        Wn=[bp_lo_freq, bp_hi_freq],
+        btype="bandpass",
+        output="sos",
+        fs=sampling_freq,
+    )
+
+    # Bandpass signal
+    bandpass_signal = scipy.signal.sosfilt(sos_butter_bandpass, epoch_data)
+
+    # Fourier transform
+    fft_arr = np.abs(scipy.fft.fft(bandpass_signal)).squeeze()
+    fft_arr = np.power(fft_arr, 2)
+    ts = 1.0 / sampling_freq
+    freqs = scipy.fft.fftfreq(fft_arr.shape[-1], d=ts)
+
+    # Finding peak in spectrum
+    valid_freqs = (freqs >= bp_lo_freq) & (freqs <= bp_hi_freq)
+    fft_arr = fft_arr[valid_freqs]
+    freqs = freqs[valid_freqs]
+    max_freq_idx = fft_arr.argmax()
+
+    # Calculating SQI
+    signal_power = fft_arr.sum()
+    low_idx = max_freq_idx - freq_spread
+    hi_idx = max_freq_idx + freq_spread
+    maxpow_band_power = fft_arr[low_idx:hi_idx].sum()
+    sqi = maxpow_band_power / signal_power
+    return sqi

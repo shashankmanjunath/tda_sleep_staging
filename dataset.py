@@ -13,19 +13,28 @@ import pandas as pd
 import numpy as np
 import cripser
 import h5py
+import dtw
 import mne
 
 import tda_utils
+import utils
 
 
 class EpochItem:
-    def __init__(self, epoch, t_start, t_len):
+    def __init__(
+        self,
+        epoch: np.ndarray,
+        t_start: float,
+        t_len: float,
+        label: pd.Series,
+    ):
         self.epoch = epoch
         self.t_start = t_start
         self.t_len = t_len
+        self.label = label
 
         # Slack time
-        self.t_slack = 1.0
+        self.t_slack = 61.0
 
     def overlaps(self, other) -> bool:
         # Allow t_slack difference between old end time and new start time
@@ -33,86 +42,108 @@ class EpochItem:
         slack_time = end_time + self.t_slack
 
         if slack_time < other.t_start:
+            #  print(f"Transition: diff time {self.diff_time(other)}")
             return False
         else:
             return True
 
+    def diff_time(self, other) -> float:
+        end_time = self.t_start + self.t_len
+        diff_time = other.t_start - end_time
+        return diff_time
+
 
 class EpochCache:
-    def __init__(self, n_epochs: int, sampling_freq: float):
-        self.n_epochs = n_epochs
+    def __init__(self, sampling_freq: float):
+        self.min_epochs_valid = 25
         self.sampling_freq = sampling_freq
-        self.freq_spread = 4
 
-        self.bp_lo_freq = 0.1
-        self.bp_hi_freq = 0.75
+        self.epoch_cache = [[]]
+        self.valid_indexes = []
 
-        self.epoch_cache = []
-        self.sos_butter_bandpass = scipy.signal.butter(
-            N=3,
-            Wn=[self.bp_lo_freq, self.bp_hi_freq],
-            btype="bandpass",
-            output="sos",
-            fs=self.sampling_freq,
-        )
-
-    def add_epoch(self, epoch: np.ndarray, t_start: float, t_len: float) -> None:
-        if len(self.epoch_cache) == 0:
+    def add_epoch(
+        self,
+        epoch: np.ndarray,
+        t_start: float,
+        t_len: float,
+        label: pd.Series,
+    ) -> None:
+        if len(self.epoch_cache[-1]) == 0:
             # No epochs in cache; add to cache
-            self.epoch_cache.append(EpochItem(epoch, t_start, t_len))
+            self.epoch_cache[-1].append(EpochItem(epoch, t_start, t_len, label))
         else:
-            cur_epoch = EpochItem(epoch, t_start, t_len)
-            last_epoch = self.epoch_cache[-1]
+            cur_epoch = EpochItem(epoch, t_start, t_len, label)
+            last_epoch = self.epoch_cache[-1][-1]
 
             if last_epoch.overlaps(cur_epoch):
-                # New epoch is consecutive to previous epoch
-                if len(self.epoch_cache) == self.n_epochs:
-                    # Pop out first item if adding current will make more than
-                    # the maximum number of epochs
-                    self.epoch_cache = self.epoch_cache[1:]
-                elif len(self.epoch_cache) > self.n_epochs:
-                    raise RuntimeError("SQI Epoch Cache too large!")
                 # Add epoch to end of cache
-                self.epoch_cache.append(cur_epoch)
-            else:
-                # New epoch is not consecutive to previous epoch, so we clear
-                # cache and restart
-                self.epoch_cache = []
-                self.epoch_cache.append(cur_epoch)
+                self.epoch_cache[-1].append(cur_epoch)
 
-    def get_epoch_sequence(self) -> np.ndarray:
-        if len(self.epoch_cache) < 5:
-            raise RuntimeError("Insufficient data in epoch cache!")
-        epoch_data = np.concatenate([x.epoch for x in self.epoch_cache], axis=-1)
+                if len(self.epoch_cache[-1]) >= self.min_epochs_valid:
+                    # Centered epoch is valid
+                    n_seq = len(self.epoch_cache)
+                    n_item = len(self.epoch_cache[-1]) - (self.min_epochs_valid // 2)
+
+                    # Correcting for 0-indexing
+                    n_seq_idx = n_seq - 1
+                    n_item_idx = n_item - 1
+                    self.valid_indexes.append((n_seq_idx, n_item_idx))
+                    pass
+            else:
+                # New epoch is not consecutive to previous epoch or is new sleep
+                # stage, so we create new sequence and restart
+                self.epoch_cache.append([cur_epoch])
+
+    def __len__(self):
+        return len(self.valid_indexes)
+
+    def __getitem__(self, idx: int) -> typing.Tuple[np.ndarray, pd.Series]:
+        # Getting indexes for cache and sequence
+        cache_idx, seq_idx = self.valid_indexes[idx]
+        epoch_item = self.epoch_cache[cache_idx][seq_idx]
+        data = epoch_item.epoch
+        label = epoch_item.label
+        return data, label
+
+    def get_epoch_sequence(self, idx: int, n_epochs: int) -> np.ndarray:
+        # Getting indexes for cache and sequence
+        cache_idx, seq_idx = self.valid_indexes[idx]
+
+        # Calculating indexes of last n_epochs, including the current one
+        start_idx = seq_idx - n_epochs + 1
+        end_idx = seq_idx + 1
+
+        if start_idx < 0:
+            raise ValueError("Too many epochs requested!")
+
+        epoch_seq = [x.epoch for x in self.epoch_cache[cache_idx][start_idx:end_idx]]
+        epoch_data = np.concatenate(epoch_seq, axis=-1)
         return epoch_data
 
-    def get_sqi(self) -> float:
-        if len(self.epoch_cache) < 5:
-            return -1.0
-        epoch_data = np.concatenate([x.epoch for x in self.epoch_cache], axis=-1)
+    def get_centered_epoch_sequence(self, idx: int, n_epochs: int) -> np.ndarray:
+        # Getting indexes for cache and sequence
+        cache_idx, seq_idx = self.valid_indexes[idx]
 
-        # Bandpass signal
-        bandpass_signal = scipy.signal.sosfilt(self.sos_butter_bandpass, epoch_data)
+        start_idx = seq_idx - (n_epochs // 2)
+        end_idx = seq_idx + (n_epochs // 2) + 1
 
-        # Fourier transform
-        fft_arr = np.abs(scipy.fft.fft(bandpass_signal)).squeeze()
-        fft_arr = np.power(fft_arr, 2)
-        ts = 1.0 / self.sampling_freq
-        freqs = scipy.fft.fftfreq(fft_arr.shape[-1], d=ts)
+        epoch_seq = [x.epoch for x in self.epoch_cache[cache_idx][start_idx:end_idx]]
+        epoch_data = np.concatenate(epoch_seq, axis=-1)
+        return epoch_data
 
-        # Finding peak in spectrum
-        valid_freqs = (freqs >= self.bp_lo_freq) & (freqs <= self.bp_hi_freq)
-        fft_arr = fft_arr[valid_freqs]
-        freqs = freqs[valid_freqs]
-        max_freq_idx = fft_arr.argmax()
+    def get_template_epochs(self, idx: int, n_epochs: int) -> np.ndarray:
+        # Getting indexes for cache and sequence
+        cache_idx, seq_idx = self.valid_indexes[idx]
 
-        # Calculating SQI
-        signal_power = fft_arr.sum()
-        low_idx = max_freq_idx - self.freq_spread
-        hi_idx = max_freq_idx + self.freq_spread
-        maxpow_band_power = fft_arr[low_idx:hi_idx].sum()
-        sqi = maxpow_band_power / signal_power
-        return sqi
+        start_idx = seq_idx - (n_epochs // 2)
+        end_idx = seq_idx + (n_epochs // 2) + 1
+
+        epoch_seq = []
+        for epoch_seq_idx in range(start_idx, end_idx):
+            if epoch_seq_idx != seq_idx:
+                epoch_seq.append(self.epoch_cache[cache_idx][epoch_seq_idx].epoch)
+        epoch_data = np.stack(epoch_seq, axis=0)
+        return epoch_data
 
 
 class AirflowSignalProcessor:
@@ -216,20 +247,22 @@ class AirflowSignalProcessor:
             sleep_stage_tsv = sleep_stage_tsv.drop(index=overlap_rows.index, axis=0)
         return sleep_stage_tsv
 
-    def process(self):
-        raw_edf = mne.io.read_raw_edf(self.edf_fname, verbose=False)
+    def load_epoch_cache(
+        self,
+        raw_edf: mne.io.BaseRaw,
+        target_intervals: pd.DataFrame,
+    ) -> EpochCache:
         sfreq = raw_edf.info["sfreq"]
-
-        target_intervals = self.find_target_intervals()
         n_rows = target_intervals.shape[0]
 
-        data = []
-
         # Running epochs for signal quality index calculation
-        airflow_cache = EpochCache(self.n_epochs_sqi, sampling_freq=sfreq)
-        resp_rate_cache = EpochCache(self.n_epochs_sqi, sampling_freq=sfreq)
+        airflow_cache = EpochCache(sampling_freq=sfreq)
 
-        pbar = tqdm(target_intervals.iterrows(), total=n_rows, desc=self.pt_id)
+        pbar = tqdm(
+            target_intervals.iterrows(),
+            total=n_rows,
+            desc=f"Loading {self.pt_id}...",
+        )
         for idx, (_, interval) in enumerate(pbar):
             interval_start_idx = int(interval.onset * sfreq)
             interval_end_idx = int(interval.end * sfreq)
@@ -241,36 +274,29 @@ class AirflowSignalProcessor:
                 start=interval_start_idx,
                 stop=interval_end_idx,
             )
-            cur_resp_rate = raw_edf.get_data(
-                picks=["Resp Rate"],
-                start=interval_start_idx,
-                stop=interval_end_idx,
-            )
 
             airflow_cache.add_epoch(
                 cur_airflow,
                 t_start=interval["onset"],
                 t_len=interval["duration"],
+                label=interval,
             )
+        return airflow_cache
 
-            resp_rate_cache.add_epoch(
-                cur_resp_rate,
-                t_start=interval["onset"],
-                t_len=interval["duration"],
-            )
+    def process(self):
+        raw_edf = mne.io.read_raw_edf(self.edf_fname, verbose=False)
+        sfreq = raw_edf.info["sfreq"]
 
-            sqi = airflow_cache.get_sqi()
+        target_intervals = self.find_target_intervals()
+        airflow_cache = self.load_epoch_cache(raw_edf, target_intervals)
 
-            if sqi < 0.25:
-                # SQI is too low, reject epoch
-                #  print(f"Skipping {idx}, SQI: {sqi}")
-                continue
-
-            data_arr = airflow_cache.get_epoch_sequence()
+        data = []
+        for idx in tqdm(range(len(airflow_cache)), desc=f"Processing {self.pt_id}..."):
+            data_arr = airflow_cache.get_epoch_sequence(idx, n_epochs=6)
+            sqi = utils.calculate_sqi(data_arr, sfreq)
 
             # Calculate IRR signal
-            #  irr_signal = self.get_irr(data_arr, sfreq)
-            irr_signal = resp_rate_cache.get_epoch_sequence()
+            irr_signal = self.calc_irr(data_arr.squeeze(), sampling_freq=sfreq)
 
             # Sublevel set filtration of IRR signal
             sublevel_dgms_irr = self.sublevel_set_filtration(irr_signal)
@@ -295,7 +321,7 @@ class AirflowSignalProcessor:
             hepc_sub_airflow_0 = self.hepc(sublevel_dgms_airflow[0])
             ps_sub_airflow_0 = self.persistence_summary(sublevel_dgms_airflow[0])
 
-            feat_arr = [
+            tda_feat_arr = [
                 ps_sub_airflow_0,
                 hepc_sub_airflow_0,
                 hepc_rips_airflow_0,
@@ -303,11 +329,55 @@ class AirflowSignalProcessor:
                 ps_irr,
                 hepc_irr,
             ]
-            feat = np.concatenate(feat_arr, axis=0)
-            data.append((feat, interval))
+            tda_feat = np.concatenate(tda_feat_arr, axis=0)
 
-        feat_arr = np.stack([x[0] for x in data])
-        label_df = pd.concat([x[1] for x in data], axis=1).T
+            # Calculating Non-TDA Features
+            # 1 Epoch Features
+            epoch_1, interval_data = airflow_cache[idx]
+            feat_set_1 = self.classic_features_breath_cycle(epoch_1, sfreq)
+            #  feat_set_5 = self.classic_features_motion(epoch_1, sfreq)
+
+            # 5 Epoch Features
+            epoch_5 = airflow_cache.get_epoch_sequence(idx, n_epochs=5)
+
+            # Getting surrounding template epochs for dtw
+            #  epoch_dtw_template = airflow_cache.get_template_epochs(idx, n_epochs=10)
+            #  feat_set_2 = self.classic_features_dtw(epoch_5, epoch_dtw_template, sfreq)
+
+            # 25 Epoch Features
+            epoch_25 = airflow_cache.get_centered_epoch_sequence(idx, n_epochs=25)
+            feat_set_3 = self.classic_features_resp_vol(epoch_25, sfreq)
+            feat_set_4 = self.classic_features_power(epoch_25, sfreq)
+
+            ntda_feat = np.concatenate(
+                (
+                    feat_set_1,
+                    #  feat_set_2,
+                    feat_set_3,
+                    feat_set_4,
+                    #  feat_set_5,
+                ),
+                axis=-1,
+            )
+
+            # Grouping features
+            data.append(
+                {
+                    "TDA": tda_feat,
+                    "classic": ntda_feat,
+                    "label": interval_data,
+                    "sqi": sqi,
+                }
+            )
+
+            if idx > 10:
+                break
+
+        tda_feat_arr = np.stack([x["TDA"] for x in data])
+        classic_feat_arr = np.stack([x["classic"] for x in data])
+        sqi_arr = np.stack([x["sqi"] for x in data])
+
+        label_df = pd.concat([x["label"] for x in data], axis=1).T
         label_df = label_df.drop("interval", axis=1)
 
         # Converting types
@@ -317,8 +387,10 @@ class AirflowSignalProcessor:
         label_df["end"] = label_df["end"].astype(str)
 
         with h5py.File(self.save_fname, "a") as f:
-            f.create_dataset("tda_feature", data=feat_arr)
-        label_df.to_hdf(self.save_fname, key=f"tda_label")
+            f.create_dataset("tda_feature", data=tda_feat_arr)
+            f.create_dataset("classic_feature", data=classic_feat_arr)
+            f.create_dataset("sqi", data=sqi_arr)
+        label_df.to_hdf(self.save_fname, key=f"label")
         return
 
     def calc_irr(self, arr: np.ndarray, sampling_freq: float) -> np.ndarray:
@@ -361,10 +433,7 @@ class AirflowSignalProcessor:
         return clean_arr
 
     def sublevel_set_filtration(self, arr: np.ndarray) -> typing.List[np.ndarray]:
-        """Performs sublevel set filtration based on ripser.
-        Code modified from:
-            https://ripser.scikit-tda.org/en/latest/notebooks/Lower%20Star%20Time%20Series.html
-        """
+        """Performs sublevel set filtration"""
         arr = arr.squeeze()
         assert len(arr.shape) == 1
 
@@ -423,6 +492,266 @@ class AirflowSignalProcessor:
         dgm_clean = dgm[~np.isinf(dgm).any(1)]
         hepc_feat = tda_utils.hepc(dgm_clean)
         return hepc_feat
+
+    def classic_features_breath_cycle(
+        self, arr: np.ndarray, sfreq: float
+    ) -> np.ndarray:
+        arr = arr.squeeze()
+        arr = arr - np.mean(arr)
+        cleaned = nk.rsp_clean(arr, sampling_rate=sfreq)
+        _, peaks_dict = nk.rsp_peaks(cleaned)
+        info = nk.rsp_fixpeaks(peaks_dict)
+        peaks = cleaned[info["RSP_Peaks"]]
+
+        if len(peaks) > 5:
+            # Calculating necessary information for features
+            troughs = cleaned[info["RSP_Troughs"]]
+
+            pidx = info["RSP_Peaks"]
+            tidx = info["RSP_Troughs"]
+
+            inhalation = []
+            exhalation = []
+            IER = []
+            for idx in range(1, len(peaks)):
+                inhalation_signal = cleaned[pidx[idx - 1] : tidx[idx]]
+                exhalation_signal = cleaned[tidx[idx - 1] : pidx[idx - 1]]
+
+                inhalation.append(np.sum(np.abs(inhalation_signal)) / sfreq)
+                exhalation.append(np.sum(np.abs(exhalation_signal)) / sfreq)
+
+                inhalation_diff = tidx[idx] - pidx[idx - 1]
+                exhalation_diff = pidx[idx - 1] - tidx[idx - 1]
+                inhalation_exhalation_ratio = inhalation_diff / exhalation_diff
+                IER.append(inhalation_exhalation_ratio)
+
+            # Features 1 and 2
+            med_amp = np.median(peaks - troughs)
+            iqr_amp = utils.iqr(peaks - troughs)
+
+            # Features 3 and 4
+            med_width = np.median(IER)
+            iqr_width = utils.iqr(IER)
+
+            # Features 5 and 6
+            med_peaks = np.median(peaks)
+            iqr_peaks = utils.iqr(peaks)
+
+            # Features 7 and 8
+            med_troughs = np.median(troughs)
+            iqr_troughs = utils.iqr(troughs)
+
+            # Features 9, 10, and 11
+            mai = np.median(inhalation)
+            mae = np.median(exhalation)
+            mai_mae_ratio = mai / mae
+
+            feat_arr = np.asarray(
+                [
+                    med_amp,
+                    iqr_amp,
+                    med_width,
+                    iqr_width,
+                    med_peaks,
+                    iqr_peaks,
+                    med_troughs,
+                    iqr_troughs,
+                    mai,
+                    mae,
+                    mai_mae_ratio,
+                ]
+            )
+        else:
+            feat_arr = np.zeros(11)
+
+        return feat_arr
+
+    def classic_features_dtw(
+        self,
+        arr: np.ndarray,
+        template_arr: np.ndarray,
+        sfreq: float,
+    ) -> np.ndarray:
+        window_size = 50
+        freq_size = 50
+
+        arr = arr.squeeze()
+        rsp = arr - np.mean(arr)
+        template_arr = template_arr.squeeze()
+
+        # Decimating array for performance/memory
+        rsp = scipy.signal.decimate(arr, 10, zero_phase=True)
+
+        dist_t = []
+        dist_f = []
+        for idx in range(5, template_arr.shape[0]):
+            template_arr_iter = template_arr[idx - 5 : idx]
+            template_arr_iter = template_arr_iter.reshape(-1)
+            template_arr_iter = scipy.signal.decimate(
+                template_arr_iter,
+                10,
+                zero_phase=True,
+            )
+
+            alignment_t = dtw.dtw(
+                rsp,
+                template_arr_iter,
+                keep_internals=True,
+                window_type="sakoechiba",
+                window_args={"window_size": window_size},
+            )
+            dist_t.append(alignment_t.normalizedDistance)
+
+            freq_rsp, psd_rsp = scipy.signal.periodogram(
+                rsp,
+                fs=sfreq // 10,
+                window="hann",
+                scaling="spectrum",
+            )
+
+            freq_template, psd_template = scipy.signal.periodogram(
+                template_arr_iter,
+                fs=sfreq // 10,
+                window="hann",
+                scaling="spectrum",
+            )
+            alignment_f = dtw.dtw(
+                psd_rsp,
+                psd_template,
+                keep_internals=True,
+                window_type="sakoechiba",
+                window_args={"window_size": freq_size},
+            )
+            dist_f.append(alignment_f.normalizedDistance)
+
+        dtw_t = min(dist_t)
+        dtw_f = min(dist_f)
+
+        # Calculating standard deviation of breathing frequency
+        cleaned = nk.rsp_clean(rsp, sampling_rate=sfreq)
+        _, peaks_dict = nk.rsp_peaks(cleaned)
+        info = nk.rsp_fixpeaks(peaks_dict)
+        rsp_rate = nk.rsp_rate(cleaned, peaks_dict, sampling_rate=sfreq)
+        rrv = nk.rsp_rrv(rsp_rate, info, sampling_rate=sfreq, show=False)
+        breathing_freq_std = 1.0 / rrv["RRV_SDBB"].item()
+
+        dtw_feat = np.asarray([dtw_t, dtw_f, breathing_freq_std])
+        return dtw_feat
+
+    def classic_features_power(self, arr: np.ndarray, sfreq: float) -> np.ndarray:
+        arr = arr.squeeze()
+        rsp = arr - np.mean(arr)
+        cleaned = nk.rsp_clean(rsp, sampling_rate=sfreq)
+        _, peaks_dict = nk.rsp_peaks(cleaned)
+        info = nk.rsp_fixpeaks(peaks_dict)
+        #  peaks = cleaned[info["RSP_Peaks"]]
+
+        # Calculating RRV Features
+        rsp_rate = nk.rsp_rate(cleaned, peaks_dict, sampling_rate=sfreq)
+        rrv = nk.rsp_rrv(rsp_rate, info, sampling_rate=sfreq, show=False)
+
+        samp_entr = rrv["RRV_SampEn"]
+        vlf_logpow = rrv["RRV_VLF"]
+        lf_logpow = rrv["RRV_LF"]
+        hf_logpow = rrv["RRV_HF"]
+        lf_hf = rrv["RRV_LFHF"]
+
+        # Calculating power features
+        b, a = scipy.signal.butter(
+            3,
+            [0.1 * 2 / sfreq, 0.75 * 2 / sfreq],
+            btype="bandpass",
+        )
+        sec = arr.shape[-1] / sfreq
+        filt_signal = scipy.signal.filtfilt(b, a, rsp)
+        Fsignal = scipy.fft.fft(filt_signal)
+
+        power = np.abs(Fsignal) * np.abs(Fsignal) / arr.shape[-1]
+
+        max_power = np.max(power[int(sec * 0.15) : int(sec * 0.5)])
+        Mm = np.argwhere(power[int(sec * 0.15) : int(sec * 0.5)] == max_power)
+        max_power_loc = int(sec * 0.15) + Mm[0].item()
+
+        feat = np.asarray(
+            [
+                samp_entr.item(),
+                vlf_logpow.item(),
+                lf_logpow.item(),
+                hf_logpow.item(),
+                lf_hf.item(),
+                max_power,
+                max_power_loc,
+            ]
+        )
+        return feat
+
+    def classic_features_resp_vol(self, arr: np.ndarray, sfreq: float) -> np.ndarray:
+        arr = arr.squeeze()
+        arr = arr - np.mean(arr)
+
+        cleaned = nk.rsp_clean(arr, sampling_rate=sfreq)
+        df, peaks_dict = nk.rsp_peaks(cleaned)
+
+        info = nk.rsp_fixpeaks(peaks_dict)
+        peaks = cleaned[info["RSP_Peaks"]]
+        troughs = cleaned[info["RSP_Troughs"]]
+
+        peak_med = np.median(peaks)
+        peak_iqr = utils.iqr(peaks)
+
+        feat_15 = peak_med / peak_iqr
+
+        trough_med = np.median(troughs)
+        trough_iqr = utils.iqr(troughs)
+
+        feat_16 = trough_med / trough_iqr
+
+        cycle_amp_med = np.median(peaks - troughs)
+
+        vol_breath = []
+        vol_inhale = []
+        vol_exhale = []
+        flow_breath = []
+        flow_inhale = []
+        flow_exhale = []
+
+        pidx = info["RSP_Peaks"]
+        tidx = info["RSP_Troughs"]
+        for i in range(len(peaks) - 1):
+            vol_breath.append(np.trapz(cleaned[pidx[i] : tidx[i + 1]]))
+            vol_inhale.append(np.trapz(cleaned[tidx[i] : pidx[i]]))
+            vol_exhale.append(np.trapz(cleaned[pidx[i] : tidx[i + 1]]))
+
+            flow_breath.append(vol_breath[i] / (tidx[i + 1] - tidx[i]))
+            flow_inhale.append(vol_inhale[i] / (pidx[i] - tidx[i]))
+            flow_exhale.append(vol_exhale[i] / (tidx[i + 1] - pidx[i]))
+
+        feat_18 = np.median(vol_breath)
+        feat_19 = np.median(vol_inhale)
+        feat_20 = np.median(vol_exhale)
+        feat_21 = np.median(flow_breath)
+        feat_22 = np.median(flow_inhale)
+        feat_23 = np.median(flow_exhale)
+        feat_24 = feat_23 / feat_22
+
+        feat_arr = np.asarray(
+            [
+                feat_15,
+                feat_16,
+                cycle_amp_med,
+                feat_18,
+                feat_19,
+                feat_20,
+                feat_21,
+                feat_22,
+                feat_23,
+                feat_24,
+            ]
+        )
+        return feat_arr
+
+    def classic_features_motion(self, arr: np.ndarray, sfreq: float) -> np.ndarray:
+        pass
 
 
 def process_idx(idx):
