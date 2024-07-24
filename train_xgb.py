@@ -12,15 +12,16 @@ import sklearn
 import utils
 
 
-def train(data_dir: str):
+def train(data_dir: str, feature_name: str):
     subject_fnames = os.listdir(data_dir)
+    subject_fnames = subject_fnames[:500]
 
     all_paths = np.asarray([os.path.join(data_dir, x) for x in subject_fnames])
     all_demos = utils.get_demographics(
         all_paths,
         data_dir="/work/thesathlab/nchsdb/",
     )
-    all_data, all_label = utils.load_data(all_paths)
+    all_data, all_label = utils.load_data(all_paths, feature_name, sqi_thresh=0.25)
 
     map_type = utils.wake_nrem_rem_map
     for k, v in all_label.items():
@@ -40,7 +41,7 @@ def train(data_dir: str):
         #  use_label_encoder=False,
     )
 
-    n_splits = 5
+    n_splits = 20
     #  kf = sklearn.model_selection.KFold(
     #      n_splits=n_splits,
     #      random_state=2024,

@@ -62,20 +62,37 @@ def wake_nrem_rem_map(sample: str) -> int:
     return 1
 
 
-def load_data(fnames_list: typing.List[str]) -> typing.Tuple[dict, dict]:
+def load_data(
+    fnames_list: typing.List[str],
+    feature_name: str,
+    sqi_thresh: float,
+) -> typing.Tuple[dict, dict]:
     """Helper function to load data and labels from a list of hdf5 files"""
     data = {}
     label = {}
+
     for fname in tqdm(fnames_list):
-        fname_label = pd.read_hdf(fname, key="tda_label")
+        fname_label = pd.read_hdf(fname, key="label")
         label_arr = fname_label["description"].to_numpy()
         with h5py.File(fname, "r") as f:
             # Loading data
-            data_arr = f["tda_feature"][()]
+            if feature_name == "all":
+                data_arr_tda = f["tda_feature"][()]
+                data_arr_classic = f["classic_feature"][()]
+                data_arr = np.concatenate((data_arr_tda, data_arr_classic), axis=-1)
+            else:
+                data_arr = f[feature_name][()]
+            sqi_arr = f["sqi"][()]
+
+        # Removing low SQI data
+        data_arr_sqi = data_arr[sqi_arr >= sqi_thresh, :]
+        label_arr_sqi = label_arr[sqi_arr >= sqi_thresh]
+
         # Removing nan data
-        data_arr_corr, label_arr_corr = drop_nan_rows(data_arr, label_arr)
+        data_arr_corr, label_arr_corr = drop_nan_rows(data_arr_sqi, label_arr_sqi)
         label[fname] = label_arr_corr
         data[fname] = data_arr_corr
+
     return data, label
 
 

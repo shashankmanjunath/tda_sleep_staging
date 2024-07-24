@@ -338,7 +338,7 @@ class AirflowSignalProcessor:
             #  feat_set_5 = self.classic_features_motion(epoch_1, sfreq)
 
             # 5 Epoch Features
-            epoch_5 = airflow_cache.get_epoch_sequence(idx, n_epochs=5)
+            #  epoch_5 = airflow_cache.get_epoch_sequence(idx, n_epochs=5)
 
             # Getting surrounding template epochs for dtw
             #  epoch_dtw_template = airflow_cache.get_template_epochs(idx, n_epochs=10)
@@ -369,9 +369,6 @@ class AirflowSignalProcessor:
                     "sqi": sqi,
                 }
             )
-
-            if idx > 10:
-                break
 
         tda_feat_arr = np.stack([x["TDA"] for x in data])
         classic_feat_arr = np.stack([x["classic"] for x in data])
@@ -780,8 +777,8 @@ def process_idx(idx):
     if (subject_ahi < 1) and (subject_age >= 2) and (subject_age < 18):
         loader.process()
     else:
-        if subject_ahi < 1:
-            print("Subject AHI too low!")
+        if subject_ahi >= 1:
+            print("Subject AHI too high!")
 
         if subject_age < 2:
             print("Subject age too low!")
