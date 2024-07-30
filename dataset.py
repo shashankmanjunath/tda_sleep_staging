@@ -1,3 +1,4 @@
+import pickle
 import typing
 import time
 import os
@@ -148,11 +149,11 @@ class EpochCache:
 
 class AirflowSignalProcessor:
     def __init__(self, pt_id: str, data_dir: str, save_dir: str):
-        # TODO: Screen for OSA
         self.pt_id = pt_id
         self.data_dir = data_dir
         self.save_dir = save_dir
-        self.save_fname = os.path.join(self.save_dir, f"{pt_id}.hdf5")
+        self.save_fname_hdf5 = os.path.join(self.save_dir, f"{pt_id}.hdf5")
+        self.save_fname_pkl = os.path.join(self.save_dir, f"{pt_id}.pkl")
 
         self.edf_fname = os.path.join(self.data_dir, "sleep_data", f"{self.pt_id}.edf")
         self.tsv_fname = os.path.join(self.data_dir, "sleep_data", f"{self.pt_id}.tsv")
@@ -291,6 +292,11 @@ class AirflowSignalProcessor:
         airflow_cache = self.load_epoch_cache(raw_edf, target_intervals)
 
         data = []
+        dgms_dict = {
+            "irr_sublevel": [],
+            "airflow_sublevel": [],
+            "airflow_rips": [],
+        }
         for idx in tqdm(range(len(airflow_cache)), desc=f"Processing {self.pt_id}..."):
             data_arr = airflow_cache.get_epoch_sequence(idx, n_epochs=6)
             sqi = utils.calculate_sqi(data_arr, sfreq)
@@ -367,8 +373,15 @@ class AirflowSignalProcessor:
                     "classic": ntda_feat,
                     "label": interval_data,
                     "sqi": sqi,
+                    "irr_sublevel": sublevel_dgms_irr,
+                    "airflow_sublevel": sublevel_dgms_airflow,
+                    "airflow_rips": rips_dgms_airflow,
                 }
             )
+
+            dgms_dict["irr_sublevel"].append(sublevel_dgms_irr)
+            dgms_dict["airflow_sublevel"].append(sublevel_dgms_airflow)
+            dgms_dict["airflow_rips"].append(rips_dgms_airflow)
 
         tda_feat_arr = np.stack([x["TDA"] for x in data])
         classic_feat_arr = np.stack([x["classic"] for x in data])
@@ -383,11 +396,17 @@ class AirflowSignalProcessor:
         label_df["description"] = label_df["description"].astype(str)
         label_df["end"] = label_df["end"].astype(str)
 
-        with h5py.File(self.save_fname, "a") as f:
+        # Saving h5py File
+        with h5py.File(self.save_fname_hdf5, "a") as f:
             f.create_dataset("tda_feature", data=tda_feat_arr)
             f.create_dataset("classic_feature", data=classic_feat_arr)
             f.create_dataset("sqi", data=sqi_arr)
-        label_df.to_hdf(self.save_fname, key=f"label")
+        label_df.to_hdf(self.save_fname_hdf5, key=f"label")
+
+        #  Saving pkl file with dgms
+        with open(self.save_fname_pkl, "wb") as f:
+            pickle.dump(dgms_dict, f, protocol=pickle.HIGHEST_PROTOCOL)
+
         return
 
     def calc_irr(self, arr: np.ndarray, sampling_freq: float) -> np.ndarray:
@@ -762,7 +781,7 @@ def process_idx(idx):
     pt_id = pt_ids[idx]
     #  pt_id = "7612_21985"
 
-    save_dir = "/work/thesathlab/manjunath.sh/tda_sleep_staging_ptaf/"
+    save_dir = "/work/thesathlab/manjunath.sh/tda_sleep_staging_ptaf_dgms/"
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
 
