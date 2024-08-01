@@ -23,7 +23,7 @@ def ttest_xgb(run_1: str, run_2: str, run_3: str):
 
         history_df = run.history()
 
-        data[experiment_type] = history_df.iloc[-1]["test_ba_all"]
+        data[experiment_type] = history_df["test_ba"].tolist()
 
     experiments = list(data.keys())
     combos = list(combinations(experiments, 2))
@@ -38,4 +38,8 @@ def ttest_xgb(run_1: str, run_2: str, run_3: str):
 
 
 if __name__ == "__main__":
-    Fire(ttest_xgb)
+    ttest_xgb(
+        run_1="a9cqryo0",
+        run_2="vfvj6x8g",
+        run_3="zak66wpy",
+    )

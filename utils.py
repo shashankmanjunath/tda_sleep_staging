@@ -1,4 +1,5 @@
 import typing
+import pickle
 import os
 
 from tqdm import tqdm
@@ -7,6 +8,8 @@ import pandas as pd
 import numpy as np
 import scipy
 import h5py
+
+import tda_utils
 
 
 def iqr(x):
@@ -62,12 +65,12 @@ def wake_nrem_rem_map(sample: str) -> int:
     return 1
 
 
-def load_data(
+def load_data_hdf5(
     fnames_list: typing.List[str],
     feature_name: str,
     sqi_thresh: float,
 ) -> typing.Tuple[dict, dict]:
-    """Helper function to load data and labels from a list of hdf5 files"""
+    """Helper function to load data saved in hdf5 files"""
     data = {}
     label = {}
 
@@ -93,6 +96,57 @@ def load_data(
         label[fname] = label_arr_corr
         data[fname] = data_arr_corr
 
+    return data, label
+
+
+def load_data_pkl(
+    fnames_list: typing.List[str],
+    sqi_thresh: float,
+) -> typing.Tuple[dict, dict]:
+    fnames_list_pkl = [x.replace(".hdf5", ".pkl") for x in fnames_list]
+
+    data = {}
+    label = {}
+    for fname_pkl, fname_hdf5 in zip(tqdm(fnames_list_pkl), fnames_list):
+        with open(fname_pkl, "rb") as f:
+            data_arr = pickle.load(f)
+
+        with h5py.File(fname_hdf5, "r") as f:
+            sqi_arr = f["sqi"][()]
+
+        feat_arr = []
+        for sqi_idx in range(len(sqi_arr)):
+            feat_arr_idx = {}
+            for k, v in data_arr.items():
+                feat_arr_idx[k] = v[sqi_idx]
+            feat_arr.append(feat_arr_idx)
+
+        fname_label = pd.read_hdf(fname_hdf5, key="label")
+        label_arr = fname_label["description"].to_numpy()
+
+        feat_arr_sqi = []
+        for sqi, feat in zip(sqi_arr, feat_arr):
+            if sqi >= sqi_thresh:
+                feat_arr_sqi.append(feat)
+        label_arr_sqi = label_arr[sqi_arr >= sqi_thresh]
+
+        data[fname_hdf5] = feat_arr_sqi
+        label[fname_hdf5] = label_arr_sqi
+    return data, label
+
+
+def load_data(
+    fnames_list: typing.List[str],
+    feature_name: str,
+    sqi_thresh: float,
+) -> typing.Tuple[dict, dict]:
+    """Helper function to load data and labels from a list of files"""
+    if feature_name in ["tda_feature", "classic_feature", "all"]:
+        data, label = load_data_hdf5(fnames_list, feature_name, sqi_thresh)
+    elif feature_name in ["persistence_landscape", "template_function"]:
+        data, label = load_data_pkl(fnames_list, sqi_thresh)
+    else:
+        raise ValueError(f"Feature name {feature_name} not recognized!")
     return data, label
 
 
@@ -160,3 +214,136 @@ def calculate_sqi(epoch_data: np.ndarray, sampling_freq: float) -> float:
     maxpow_band_power = fft_arr[low_idx:hi_idx].sum()
     sqi = maxpow_band_power / signal_power
     return sqi
+
+
+def get_tda_feature_names() -> typing.List[str]:
+    feature_names = [
+        # ps_sub_airflow_0
+        "airflow_sublevel_midlife_mean_h0",
+        "airflow_sublevel_midlife_std_h0",
+        "airflow_sublevel_midlife_skew_h0",
+        "airflow_sublevel_midlife_kurt_h0",
+        "airflow_sublevel_midlife_entropy_h0",
+        "airflow_sublevel_lifespan_mean_h0",
+        "airflow_sublevel_lifespan_std_h0",
+        "airflow_sublevel_lifespan_skew_h0",
+        "airflow_sublevel_lifespan_kurt_h0",
+        "airflow_sublevel_lifespan_entropy_h0",
+        "airflow_gaussian_persistence_curve_h0",
+        # hepc_sub_airflow_0
+        "airflow_sublevel_hepc_0_h0",
+        "airflow_sublevel_hepc_1_h0",
+        "airflow_sublevel_hepc_2_h0",
+        "airflow_sublevel_hepc_3_h0",
+        "airflow_sublevel_hepc_4_h0",
+        "airflow_sublevel_hepc_5_h0",
+        "airflow_sublevel_hepc_6_h0",
+        "airflow_sublevel_hepc_7_h0",
+        "airflow_sublevel_hepc_8_h0",
+        "airflow_sublevel_hepc_9_h0",
+        "airflow_sublevel_hepc_10_h0",
+        "airflow_sublevel_hepc_11_h0",
+        "airflow_sublevel_hepc_12_h0",
+        "airflow_sublevel_hepc_13_h0",
+        "airflow_sublevel_hepc_14_h0",
+        # hepc_rips_airflow_0
+        "airflow_rips_hepc_0_h0",
+        "airflow_rips_hepc_1_h0",
+        "airflow_rips_hepc_2_h0",
+        "airflow_rips_hepc_3_h0",
+        "airflow_rips_hepc_4_h0",
+        "airflow_rips_hepc_5_h0",
+        "airflow_rips_hepc_6_h0",
+        "airflow_rips_hepc_7_h0",
+        "airflow_rips_hepc_8_h0",
+        "airflow_rips_hepc_9_h0",
+        "airflow_rips_hepc_10_h0",
+        "airflow_rips_hepc_11_h0",
+        "airflow_rips_hepc_12_h0",
+        "airflow_rips_hepc_13_h0",
+        "airflow_rips_hepc_14_h0",
+        # ps_rips_airflow_1
+        "airflow_sublevel_midlife_mean_h1",
+        "airflow_sublevel_midlife_std_h1",
+        "airflow_sublevel_midlife_skew_h1",
+        "airflow_sublevel_midlife_kurt_h1",
+        "airflow_sublevel_midlife_entropy_h1",
+        "airflow_sublevel_lifespan_mean_h1",
+        "airflow_sublevel_lifespan_std_h1",
+        "airflow_sublevel_lifespan_skew_h1",
+        "airflow_sublevel_lifespan_kurt_h1",
+        "airflow_sublevel_lifespan_entropy_h1",
+        "airflow_gaussian_persistence_curve_h1",
+        # ps_irr
+        "irr_sublevel_midlife_mean_h0",
+        "irr_sublevel_midlife_std_h0",
+        "irr_sublevel_midlife_skew_h0",
+        "irr_sublevel_midlife_kurt_h0",
+        "irr_sublevel_midlife_entropy_h0",
+        "irr_sublevel_lifespan_mean_h0",
+        "irr_sublevel_lifespan_std_h0",
+        "irr_sublevel_lifespan_skew_h0",
+        "irr_sublevel_lifespan_kurt_h0",
+        "irr_sublevel_lifespan_entropy_h0",
+        "irr_gaussian_persistence_curve_h0",
+        # hepc_irr
+        "irr_sublevel_hepc_0_h0",
+        "irr_sublevel_hepc_1_h0",
+        "irr_sublevel_hepc_2_h0",
+        "irr_sublevel_hepc_3_h0",
+        "irr_sublevel_hepc_4_h0",
+        "irr_sublevel_hepc_5_h0",
+        "irr_sublevel_hepc_6_h0",
+        "irr_sublevel_hepc_7_h0",
+        "irr_sublevel_hepc_8_h0",
+        "irr_sublevel_hepc_9_h0",
+        "irr_sublevel_hepc_10_h0",
+        "irr_sublevel_hepc_11_h0",
+        "irr_sublevel_hepc_12_h0",
+        "irr_sublevel_hepc_13_h0",
+        "irr_sublevel_hepc_14_h0",
+    ]
+    return feature_names
+
+
+def get_ntda_feature_names() -> typing.List[str]:
+    feature_names = [
+        "breathing_cycle_amp_med",
+        "breathing_cycle_amp_iqr",
+        "breathing_cycle_width_med",
+        "breathing_cycle_width_iqr",
+        "breathing_cycle_peak_med",
+        "breathing_cycle_peak_iqr",
+        "breathing_cycle_trough_med",
+        "breathing_cycle_trough_iqr",
+        "mai",
+        "mae",
+        "mai/mae",
+        "med_peaks/iqr_peaks",
+        "med_troughs/iqr_troughs",
+        "cycle_amp_med",
+        "resp_vol_cycle_med",
+        "resp_vol_inhale_med",
+        "resp_vol_exhale_med",
+        "resp_flow_cycle_med",
+        "resp_flow_inhale_med",
+        "resp_flow_exhale_med",
+        "resp_flow_inhale_med/resp_flow_exhale_med",
+        "sample_entropy",
+        "log_vlf_pow",
+        "log_lf_pow",
+        "log_hf_pow",
+        "lf/hf",
+        "peak_freq_hf",
+        "peak_freq_power_hf",
+    ]
+    return feature_names
+
+
+def sort_dict_list(data_dict: typing.Dict) -> typing.List:
+    output_arr = []
+    for k, v in data_dict.items():
+        output_arr.append((k, v))
+
+    output_arr = sorted(output_arr, key=lambda x: x[1], reverse=True)
+    return output_arr

@@ -12,6 +12,7 @@ import sklearn
 import skopt
 import wandb
 
+import tda_utils
 import utils
 
 
@@ -157,8 +158,10 @@ def xgb_param_search(data_dir: str, feature_name: str):
     pass
 
 
-def train(data_dir: str, feature_name: str):
-    subject_fnames = os.listdir(data_dir)
+def train(data_dir: str, feature_name: str, use_wandb: bool = False):
+    subject_fnames = [x for x in os.listdir(data_dir) if x.endswith(".hdf5")]
+    #  subject_fnames = subject_fnames[:10]
+
     all_paths = np.asarray([os.path.join(data_dir, x) for x in subject_fnames])
     all_demos = utils.get_demographics(
         all_paths,
@@ -196,20 +199,26 @@ def train(data_dir: str, feature_name: str):
         random_state=kf_seed,
         shuffle=True,
     )
+    #  kf = sklearn.model_selection.KFold(
+    #      n_splits=n_splits,
+    #      random_state=kf_seed,
+    #      shuffle=True,
+    #  )
 
     # wandb setup
-    wandb.init(
-        project="tda_airflow_sleep_staging",
-        config={
-            "xgb_params": model.get_xgb_params(),
-            "n_splits": n_splits,
-            "subject_fnames": subject_fnames,
-            "data_dir": data_dir,
-            "feature_name": feature_name,
-            "xgb_seed": xgb_seed,
-            "kf_seed": kf_seed,
-        },
-    )
+    if use_wandb:
+        wandb.init(
+            project="tda_airflow_sleep_staging",
+            config={
+                "xgb_params": model.get_xgb_params(),
+                "n_splits": n_splits,
+                "subject_fnames": subject_fnames,
+                "data_dir": data_dir,
+                "feature_name": feature_name,
+                "xgb_seed": xgb_seed,
+                "kf_seed": kf_seed,
+            },
+        )
 
     train_ba_arr = []
     test_ba_arr = []
@@ -224,17 +233,31 @@ def train(data_dir: str, feature_name: str):
         train_fnames = all_paths[train_idx]
         test_fnames = all_paths[test_idx]
 
-        train_data = np.concatenate(
-            [all_data[pt_fname] for pt_fname in train_fnames],
-            axis=0,
-        )
+        if feature_name in ["tda_feature", "classic_feature", "all"]:
+            train_data = np.concatenate(
+                [all_data[pt_fname] for pt_fname in train_fnames],
+                axis=0,
+            )
+
+            test_data = np.concatenate(
+                [all_data[pt_fname] for pt_fname in test_fnames],
+                axis=0,
+            )
+        elif feature_name == "persistence_landscape":
+            train_data, test_data = tda_utils.convert_pd_pl_train_test(
+                all_data,
+                train_fnames,
+                test_fnames,
+            )
+        elif feature_name == "template_function":
+            train_data, test_data = tda_utils.apply_template_function(
+                all_data,
+                train_fnames,
+                test_fnames,
+            )
+
         train_label = np.concatenate(
             [all_label[pt_fname] for pt_fname in train_fnames],
-            axis=0,
-        )
-
-        test_data = np.concatenate(
-            [all_data[pt_fname] for pt_fname in test_fnames],
             axis=0,
         )
         test_label = np.concatenate(
@@ -280,16 +303,20 @@ def train(data_dir: str, feature_name: str):
         train_acc_arr.append(train_acc)
         test_acc_arr.append(test_acc)
 
-        wandb.log(
-            {
-                f"train_ba_fold_{idx}": train_ba,
-                f"test_ba_fold_{idx}": test_ba,
-                f"train_acc_fold_{idx}": train_acc,
-                f"test_acc_fold_{idx}": test_acc,
-                f"train_cmat_fold_{idx}": train_cmat,
-                f"test_cmat_fold_{idx}": test_cmat,
-            }
-        )
+        feature_importance = model.get_booster().get_score(importance_type="gain")
+
+        if use_wandb:
+            wandb.log(
+                {
+                    f"train_ba": train_ba,
+                    f"test_ba": test_ba,
+                    f"train_acc": train_acc,
+                    f"test_acc": test_acc,
+                    f"train_cmat": train_cmat,
+                    f"test_cmat": test_cmat,
+                    f"feature_importance": feature_importance,
+                }
+            )
 
     print(f"{n_splits}-fold validation:")
     print_result("Train Balanced Accuracy", train_ba_arr)
@@ -303,19 +330,6 @@ def train(data_dir: str, feature_name: str):
     avg_test_cmat = np.stack(test_cmat_arr).mean(0)
     train_class_acc = avg_train_cmat.diagonal() / avg_train_cmat.sum(axis=1)
     test_class_acc = avg_test_cmat.diagonal() / avg_test_cmat.sum(axis=1)
-
-    wandb.log(
-        {
-            "train_ba_all": train_ba_arr,
-            "test_ba_all": test_ba_arr,
-            "train_acc_all": train_acc_arr,
-            "test_acc_all": test_acc_arr,
-            "train_class_acc": train_class_acc,
-            "test_class_acc": test_class_acc,
-            "avg_train_cmat": avg_train_cmat,
-            "avg_test_cmat": avg_test_cmat,
-        }
-    )
 
     print("Average Train Confusion Matrix")
     print(avg_train_cmat)
