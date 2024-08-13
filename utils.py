@@ -8,8 +8,15 @@ import pandas as pd
 import numpy as np
 import scipy
 import h5py
+import pywt
 
 import tda_utils
+
+proc_items = {
+    "airflow_sublevel": 0,
+    "airflow_rips": 0,
+    "irr_sublevel": 0,
+}
 
 
 def iqr(x):
@@ -83,6 +90,19 @@ def load_data_hdf5(
                 data_arr_tda = f["tda_feature"][()]
                 data_arr_classic = f["classic_feature"][()]
                 data_arr = np.concatenate((data_arr_tda, data_arr_classic), axis=-1)
+            elif feature_name == "hepc":
+                data_arr_tda = f["tda_feature"][()]
+                hepc_sub_airflow_0 = data_arr_tda[:, 11:26]
+                hepc_rips_airflow_0 = data_arr_tda[:, 26:41]
+                hepc_irr = data_arr_tda[:, -15:]
+                data_arr = np.concatenate(
+                    (
+                        hepc_sub_airflow_0,
+                        hepc_rips_airflow_0,
+                        hepc_irr,
+                    ),
+                    axis=-1,
+                )
             else:
                 data_arr = f[feature_name][()]
             sqi_arr = f["sqi"][()]
@@ -101,6 +121,7 @@ def load_data_hdf5(
 
 def load_data_pkl(
     fnames_list: typing.List[str],
+    feature_name: str,
     sqi_thresh: float,
 ) -> typing.Tuple[dict, dict]:
     fnames_list_pkl = [x.replace(".hdf5", ".pkl") for x in fnames_list]
@@ -119,6 +140,7 @@ def load_data_pkl(
             feat_arr_idx = {}
             for k, v in data_arr.items():
                 feat_arr_idx[k] = v[sqi_idx]
+
             feat_arr.append(feat_arr_idx)
 
         fname_label = pd.read_hdf(fname_hdf5, key="label")
@@ -127,7 +149,26 @@ def load_data_pkl(
         feat_arr_sqi = []
         for sqi, feat in zip(sqi_arr, feat_arr):
             if sqi >= sqi_thresh:
-                feat_arr_sqi.append(feat)
+                if feature_name == "cwt":
+                    cwt_feat = calculate_cwt_feat(feat, n_levels=10)
+                    feat_arr_sqi.append(cwt_feat)
+                elif feature_name == "haar":
+                    haar_feat = calculate_haar_feat(feat, n_levels=12)
+                    feat_arr_sqi.append(haar_feat)
+                elif feature_name == "hermfit":
+                    herm_feat = calculate_hermfit(feat, n_levels=15)
+                    feat_arr_sqi.append(herm_feat)
+                elif feature_name == "lagfit":
+                    herm_feat = calculate_lagfit(feat, n_levels=15)
+                    feat_arr_sqi.append(herm_feat)
+                elif feature_name == "wavedec":
+                    w_feat = calculate_wavedec(feat, n_levels=6)
+                    feat_arr_sqi.append(w_feat)
+                elif feature_name == "hepc_reference":
+                    w_feat = calculate_hepc_reference(feat, n_levels=15)
+                    feat_arr_sqi.append(w_feat)
+                else:
+                    feat_arr_sqi.append(feat)
         label_arr_sqi = label_arr[sqi_arr >= sqi_thresh]
 
         data[fname_hdf5] = feat_arr_sqi
@@ -141,10 +182,19 @@ def load_data(
     sqi_thresh: float,
 ) -> typing.Tuple[dict, dict]:
     """Helper function to load data and labels from a list of files"""
-    if feature_name in ["tda_feature", "classic_feature", "all"]:
+    if feature_name in ["tda_feature", "classic_feature", "all", "hepc"]:
         data, label = load_data_hdf5(fnames_list, feature_name, sqi_thresh)
-    elif feature_name in ["persistence_landscape", "template_function"]:
-        data, label = load_data_pkl(fnames_list, sqi_thresh)
+    elif feature_name in [
+        "persistence_landscape",
+        "template_function",
+        "cwt",
+        "haar",
+        "hermfit",
+        "wavedec",
+        "lagfit",
+        "hepc_reference",
+    ]:
+        data, label = load_data_pkl(fnames_list, feature_name, sqi_thresh)
     else:
         raise ValueError(f"Feature name {feature_name} not recognized!")
     return data, label
@@ -214,6 +264,156 @@ def calculate_sqi(epoch_data: np.ndarray, sampling_freq: float) -> float:
     maxpow_band_power = fft_arr[low_idx:hi_idx].sum()
     sqi = maxpow_band_power / signal_power
     return sqi
+
+
+def calculate_cwt_feat(data_dict: typing.Dict, n_levels: int):
+    levels = {
+        "airflow_sublevel": 10,
+        "airflow_rips": 2,
+        "irr_sublevel": 2,
+    }
+    #  min_pow = -1
+    #  scales = 2.0 ** np.arange(min_pow, min_pow + n_levels).astype(float)
+    #  scales = np.arange(1, n_levels + 1)
+    scales = np.asarray([0.25, 0.5, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14])
+    w = pywt.Wavelet("db2")
+
+    output_arr = []
+    for k, dgm_num in proc_items.items():
+        target_dgm = data_dict[k][dgm_num]
+        dgm_clean = target_dgm[~np.isinf(target_dgm).any(1)]
+        psi_dgm = tda_utils.psi(dgm_clean)
+        if psi_dgm.size > 0:
+            coef, _ = pywt.cwt(psi_dgm, scales, "morl")
+            #  coef = pywt.mra(psi_dgm, w, level=levels[k], transform="dwt")
+            #  output_arr.append(coef.sum(1))
+            #  output_arr.append(np.stack(coef).sum(-1))
+            output_arr.append(np.stack(coef).reshape(-1))
+        else:
+            #  output_arr.append(np.zeros((scales.shape[0],)))
+            output_arr.append(np.zeros((psi_dgm.size * (levels[k] + 1),)))
+    output_arr = np.concatenate(output_arr, axis=-1)
+    return output_arr
+
+
+def calculate_haar_feat(data_dict: typing.Dict, n_levels: int):
+    output_arr = []
+    for k, dgm_num in proc_items.items():
+        target_dgm = data_dict[k][dgm_num]
+        dgm_clean = target_dgm[~np.isinf(target_dgm).any(1)]
+        psi_dgm = tda_utils.psi(dgm_clean)
+        if psi_dgm.size > 0:
+            alpha = []
+            n_level_sum = 0.0
+            for idx, (b, d) in enumerate(dgm_clean):
+                int_val, _ = scipy.integrate.quad(
+                    lambda x: tda_utils.h_n(x, n_levels),
+                    b,
+                    d,
+                )
+                val = psi_dgm[idx] * int_val
+                n_level_sum += val
+                alpha.append(n_level_sum)
+            output_arr.append(alpha)
+        else:
+            output_arr.append(np.zeros((n_levels,)))
+    output_arr = np.concatenate(output_arr, axis=-1)
+    return output_arr
+
+
+def calculate_hermfit(data_dict: typing.Dict, n_levels: int):
+    output_arr = []
+    for k, dgm_num in proc_items.items():
+        target_dgm = data_dict[k][dgm_num]
+        dgm_clean = target_dgm[~np.isinf(target_dgm).any(1)]
+        psi_dgm = tda_utils.psi(dgm_clean)
+        if psi_dgm.size > 0:
+            x = np.linspace(0, dgm_clean.max(), 1000)
+            y = np.zeros(x.shape)
+
+            for idx, (b, d) in enumerate(dgm_clean):
+                arr_idx = (x >= b) & (x <= d)
+                y[arr_idx] += psi_dgm[idx]
+            alpha = np.polynomial.hermite.hermfit(x, y, deg=n_levels - 1)
+            output_arr.append(alpha)
+        else:
+            output_arr.append(np.zeros((n_levels,)))
+    output_arr = np.concatenate(output_arr, axis=-1)
+    return output_arr
+
+
+def calculate_hepc_reference(data_dict: typing.Dict, n_levels: int):
+    norm = scipy.stats.norm
+    output_arr = []
+    for k, dgm_num in proc_items.items():
+        target_dgm = data_dict[k][dgm_num]
+        dgm_clean = target_dgm[~np.isinf(target_dgm).any(1)]
+        b = dgm_clean[:, 0]
+        d = dgm_clean[:, 1]
+
+        psi = tda_utils.psi(dgm_clean)
+        c = np.power(np.pi, -1.0 / 4) * np.sqrt(2 * np.pi)
+
+        alphan = np.zeros(n_levels)
+        alphan[0] = c * np.sum(psi * (norm.cdf(d) - norm.cdf(b)))
+
+        c = np.power(2, -1.0 / 2) * c
+        alphan[1] = 2 * c * np.sum(psi * (norm.pdf(b) - norm.pdf(d)))
+
+        tempsum = 0.0
+        for i in range(2, n_levels):
+            c = np.power(2 * i, -1.0 / 2) * c
+            tempsum = np.sum(
+                psi
+                * (
+                    norm.pdf(b) * scipy.special.eval_hermite(i - 1, b)
+                    - norm.pdf(d) * scipy.special.eval_hermite(i - 1, d)
+                )
+            )
+            alphan[i] = 2 * c * tempsum + alphan[i - 2] * 2 * (i - 1) / np.sqrt(
+                4 * (i - 1) * i
+            )
+        output_arr.append(alphan)
+    output_arr = np.concatenate(output_arr, axis=-1)
+    return output_arr
+
+
+def calculate_lagfit(data_dict: typing.Dict, n_levels: int):
+    output_arr = []
+    for k, dgm_num in proc_items.items():
+        target_dgm = data_dict[k][dgm_num]
+        dgm_clean = target_dgm[~np.isinf(target_dgm).any(1)]
+        psi_dgm = tda_utils.psi(dgm_clean)
+        if psi_dgm.size > 0:
+            x = np.linspace(0, dgm_clean.max(), 1000)
+            y = np.zeros(x.shape)
+
+            for idx, (b, d) in enumerate(dgm_clean):
+                arr_idx = (x >= b) & (x <= d)
+                y[arr_idx] += psi_dgm[idx]
+            alpha = np.polynomial.laguerre.lagfit(x, y, deg=n_levels - 1)
+            output_arr.append(alpha)
+        else:
+            output_arr.append(np.zeros((n_levels,)))
+    output_arr = np.concatenate(output_arr, axis=-1)
+    return output_arr
+
+
+def calculate_wavedec(data_dict: typing.Dict, n_levels: int):
+    w = pywt.Wavelet("haar")
+    output_arr = []
+    for k, dgm_num in proc_items.items():
+        target_dgm = data_dict[k][dgm_num]
+        dgm_clean = target_dgm[~np.isinf(target_dgm).any(1)]
+        psi_dgm = tda_utils.psi(dgm_clean)
+        if psi_dgm.size > 0:
+            coef_arr = pywt.wavedec(psi_dgm, wavelet=w, level=3)
+            output_arr.append(np.asarray([x.sum() for x in coef_arr]))
+        else:
+            #  output_arr.append(np.zeros((scales.shape[0],)))
+            output_arr.append(np.zeros(4))
+    output_arr = np.concatenate(output_arr, axis=-1)
+    return output_arr
 
 
 def get_tda_feature_names() -> typing.List[str]:

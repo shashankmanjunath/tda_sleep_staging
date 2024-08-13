@@ -1,5 +1,6 @@
 from collections import defaultdict
 import typing
+import math
 
 from teaspoon.ML import feature_functions
 from teaspoon.ML import Base
@@ -23,7 +24,7 @@ pl_params = {
 
 n_hom_deg = {
     "irr_sublevel": 1,
-    #  "airflow_sublevel": 1,
+    "airflow_sublevel": 1,
     "airflow_rips": 2,
 }
 
@@ -176,7 +177,7 @@ def gaussian_persistence_curve(dgms: np.ndarray, sigma: float) -> float:
     return norm_1_val
 
 
-def psi(dgms: np.ndarray) -> float:
+def psi(dgms: np.ndarray) -> np.ndarray:
     pers_arr_n = dgms[:, 1] - dgms[:, 0]
     L = np.sum(pers_arr_n)
     val = pers_arr_n / L
@@ -184,7 +185,7 @@ def psi(dgms: np.ndarray) -> float:
 
 
 def hepc(dgms: np.ndarray) -> np.ndarray:
-    """Calculates the Hermite function expancsion of persistence curve (HEPC)"""
+    """Calculates the Hermite function expansion of persistence curve (HEPC)"""
     b = dgms[:, 0]
     d = dgms[:, 1]
     psi_dgms = psi(dgms)
@@ -196,7 +197,7 @@ def hepc(dgms: np.ndarray) -> np.ndarray:
     coeff = np.sqrt(2) * np.power(np.pi, 0.25)
     alpha = []
     alpha.append(np.sum(coeff * psi_dgms * rv_val_cdf_db))
-    alpha.append(np.sum(coeff * psi_dgms * rv_val_pdf_bd))
+    alpha.append(np.sum(2 * np.power(np.pi, 0.25) * psi_dgms * rv_val_pdf_bd))
 
     for n in range(2, 15):
         # Indexing starts from 1 before current n
@@ -206,14 +207,27 @@ def hepc(dgms: np.ndarray) -> np.ndarray:
         const_i = (n_index * alpha[n_index - 1]) / np.sqrt(n_index * (n_index + 1))
 
         hfunc = scipy.special.hermite(n_index)
-        #  hdiff = hfunc(b) - hfunc(d)
-
-        # NOTE: This multiplication by the Gaussian PDF is found in the code,
-        # but not in the paper. I have included it since it fixes some scaling
-        # issues.
-        hdiff = rv_gen.pdf(b) * hfunc(b) - rv_gen.pdf(d) * hfunc(d)
+        c_n = np.sqrt(2 * np.pi) / np.sqrt(
+            np.power(2, n) * math.factorial(n) * np.sqrt(np.pi)
+        )
+        hdiff = c_n * (rv_gen.pdf(b) * hfunc(b) - rv_gen.pdf(d) * hfunc(d))
         val_i = psi_dgms * hdiff
 
         alpha.append((coeff_i * np.sum(val_i)) + const_i)
     alpha = np.asarray(alpha)
     return alpha
+
+
+def h(t):
+    if t >= 0 and t <= 0.5:
+        return 1
+    elif t > 0.5 and t <= 1:
+        return -1
+    return 0
+
+
+def h_n(t, n):
+    npow = np.power(2, n)
+    npow2 = np.power(2, n / 2)
+    val = npow2 * h(npow * t)
+    return val

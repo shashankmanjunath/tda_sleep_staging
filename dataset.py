@@ -314,8 +314,6 @@ class AirflowSignalProcessor:
             ps_irr = self.persistence_summary(sublevel_dgms_irr[0])
             hepc_irr = self.hepc(sublevel_dgms_irr[0])
 
-            # Noted issue: 14869_23599 (idx 1041)
-
             # Applying time-delay embedding and Rips filtration to airflow
             # signal
             rips_dgms_airflow = self.rips_filtration(data_arr, sfreq)
@@ -329,13 +327,18 @@ class AirflowSignalProcessor:
 
             tda_feat_arr = [
                 ps_sub_airflow_0,
-                hepc_sub_airflow_0,
-                hepc_rips_airflow_0,
                 ps_rips_airflow_1,
                 ps_irr,
+            ]
+
+            hepc_feat_arr = [
+                hepc_sub_airflow_0,
+                hepc_rips_airflow_0,
                 hepc_irr,
             ]
+
             tda_feat = np.concatenate(tda_feat_arr, axis=0)
+            hepc_feat = np.concatenate(hepc_feat_arr, axis=0)
 
             # Calculating Non-TDA Features
             # 1 Epoch Features
@@ -369,7 +372,8 @@ class AirflowSignalProcessor:
             # Grouping features
             data.append(
                 {
-                    "TDA": tda_feat,
+                    "tda": tda_feat,
+                    "hepc": hepc_feat,
                     "classic": ntda_feat,
                     "label": interval_data,
                     "sqi": sqi,

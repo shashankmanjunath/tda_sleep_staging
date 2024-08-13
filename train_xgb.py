@@ -160,7 +160,8 @@ def xgb_param_search(data_dir: str, feature_name: str):
 
 def train(data_dir: str, feature_name: str, use_wandb: bool = False):
     subject_fnames = [x for x in os.listdir(data_dir) if x.endswith(".hdf5")]
-    #  subject_fnames = subject_fnames[:10]
+    #  subject_fnames = subject_fnames[:50]
+    #  subject_fnames = subject_fnames[:5]
 
     all_paths = np.asarray([os.path.join(data_dir, x) for x in subject_fnames])
     all_demos = utils.get_demographics(
@@ -233,7 +234,18 @@ def train(data_dir: str, feature_name: str, use_wandb: bool = False):
         train_fnames = all_paths[train_idx]
         test_fnames = all_paths[test_idx]
 
-        if feature_name in ["tda_feature", "classic_feature", "all"]:
+        if feature_name in [
+            "tda_feature",
+            "classic_feature",
+            "all",
+            "hepc",
+            "hepc_reference",
+            "cwt",
+            "haar",
+            "hermfit",
+            "wavedec",
+            "lagfit",
+        ]:
             train_data = np.concatenate(
                 [all_data[pt_fname] for pt_fname in train_fnames],
                 axis=0,
@@ -255,6 +267,8 @@ def train(data_dir: str, feature_name: str, use_wandb: bool = False):
                 train_fnames,
                 test_fnames,
             )
+        else:
+            raise RuntimeError("Feature type not recognized!")
 
         train_label = np.concatenate(
             [all_label[pt_fname] for pt_fname in train_fnames],
