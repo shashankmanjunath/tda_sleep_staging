@@ -205,16 +205,28 @@ def hepc(dgms: np.ndarray) -> np.ndarray:
 
         coeff_i = np.sqrt(2) / np.sqrt(n_index + 1)
         const_i = (n_index * alpha[n_index - 1]) / np.sqrt(n_index * (n_index + 1))
+        cn = np.sqrt(2 * np.pi) / np.sqrt(
+            np.power(2.0, n_index) * math.factorial(n_index) * np.sqrt(np.pi)
+        )
 
         hfunc = scipy.special.hermite(n_index)
-        c_n = np.sqrt(2 * np.pi) / np.sqrt(
-            np.power(2, n) * math.factorial(n) * np.sqrt(np.pi)
-        )
-        hdiff = c_n * (rv_gen.pdf(b) * hfunc(b) - rv_gen.pdf(d) * hfunc(d))
+        hdiff = cn * (rv_gen.pdf(b) * hfunc(b) - rv_gen.pdf(d) * hfunc(d))
         val_i = psi_dgms * hdiff
 
         alpha.append((coeff_i * np.sum(val_i)) + const_i)
     alpha = np.asarray(alpha)
+    return alpha
+
+
+def fft_pc(dgms: np.ndarray) -> np.ndarray:
+    psi_dgm = psi(dgms)
+    x = np.linspace(0, dgms.max(), 1000)
+    y = np.zeros(x.shape)
+
+    for idx, (b, d) in enumerate(dgms):
+        arr_idx = (x >= b) & (x <= d)
+        y[arr_idx] += psi_dgm[idx]
+    alpha = np.fft.rfft(y)
     return alpha
 
 

@@ -89,7 +89,6 @@ class EpochCache:
                     n_seq_idx = n_seq - 1
                     n_item_idx = n_item - 1
                     self.valid_indexes.append((n_seq_idx, n_item_idx))
-                    pass
             else:
                 # New epoch is not consecutive to previous epoch or is new sleep
                 # stage, so we create new sequence and restart
@@ -313,37 +312,32 @@ class AirflowSignalProcessor:
 
             ps_irr = self.persistence_summary(sublevel_dgms_irr[0])
             hepc_irr = self.hepc(sublevel_dgms_irr[0])
+            hepc_np_irr = self.hepc_np(sublevel_dgms_irr[0])
+            fft_irr = self.fft_pc(sublevel_dgms_irr[0])
 
             # Applying time-delay embedding and Rips filtration to airflow
             # signal
             rips_dgms_airflow = self.rips_filtration(data_arr, sfreq)
             hepc_rips_airflow_0 = self.hepc(rips_dgms_airflow[0])
+            hepc_rips_airflow_1 = self.hepc(rips_dgms_airflow[1])
+            hepc_np_rips_airflow_0 = self.hepc_np(rips_dgms_airflow[0])
+            hepc_np_rips_airflow_1 = self.hepc_np(rips_dgms_airflow[1])
+            ps_rips_airflow_0 = self.persistence_summary(rips_dgms_airflow[0])
             ps_rips_airflow_1 = self.persistence_summary(rips_dgms_airflow[1])
+            fft_rips_airflow_0 = self.fft_pc(rips_dgms_airflow[0])
+            fft_rips_airflow_1 = self.fft_pc(rips_dgms_airflow[1])
 
             # Sublevel set filtration of airflow signal
             sublevel_dgms_airflow = self.sublevel_set_filtration(data_arr)
             hepc_sub_airflow_0 = self.hepc(sublevel_dgms_airflow[0])
+            hepc_np_sub_airflow_0 = self.hepc_np(sublevel_dgms_airflow[0])
             ps_sub_airflow_0 = self.persistence_summary(sublevel_dgms_airflow[0])
-
-            tda_feat_arr = [
-                ps_sub_airflow_0,
-                ps_rips_airflow_1,
-                ps_irr,
-            ]
-
-            hepc_feat_arr = [
-                hepc_sub_airflow_0,
-                hepc_rips_airflow_0,
-                hepc_irr,
-            ]
-
-            tda_feat = np.concatenate(tda_feat_arr, axis=0)
-            hepc_feat = np.concatenate(hepc_feat_arr, axis=0)
+            fft_sub_airflow_0 = self.fft_pc(sublevel_dgms_airflow[0])
 
             # Calculating Non-TDA Features
             # 1 Epoch Features
             epoch_1, interval_data = airflow_cache[idx]
-            feat_set_1 = self.classic_features_breath_cycle(epoch_1, sfreq)
+            breath_cycle_1_epoch = self.classic_features_breath_cycle(epoch_1, sfreq)
             #  feat_set_5 = self.classic_features_motion(epoch_1, sfreq)
 
             # 5 Epoch Features
@@ -355,41 +349,58 @@ class AirflowSignalProcessor:
 
             # 25 Epoch Features
             epoch_25 = airflow_cache.get_centered_epoch_sequence(idx, n_epochs=25)
-            feat_set_3 = self.classic_features_resp_vol(epoch_25, sfreq)
-            feat_set_4 = self.classic_features_power(epoch_25, sfreq)
+            resp_vol_25_epoch_cent = self.classic_features_resp_vol(epoch_25, sfreq)
+            power_25_epoch_cent = self.classic_features_power(epoch_25, sfreq)
 
-            ntda_feat = np.concatenate(
-                (
-                    feat_set_1,
-                    #  feat_set_2,
-                    feat_set_3,
-                    feat_set_4,
-                    #  feat_set_5,
-                ),
-                axis=-1,
-            )
+            # 6 Epoch features to match NTDA
+            epoch_6 = data_arr
+            breath_cycle_6_epoch = self.classic_features_breath_cycle(epoch_6, sfreq)
+            resp_vol_6_epoch = self.classic_features_resp_vol(epoch_6, sfreq)
+            power_6_epoch = self.classic_features_power(epoch_6, sfreq)
 
             # Grouping features
             data.append(
                 {
-                    "tda": tda_feat,
-                    "hepc": hepc_feat,
-                    "classic": ntda_feat,
+                    # PS Features
+                    "ps_sub_airflow_0": ps_sub_airflow_0,
+                    "ps_rips_airflow_0": ps_rips_airflow_0,
+                    "ps_rips_airflow_1": ps_rips_airflow_1,
+                    "ps_irr": ps_irr,
+                    # HEPC Features
+                    "hepc_sub_airflow_0": hepc_sub_airflow_0,
+                    "hepc_rips_airflow_0": hepc_rips_airflow_0,
+                    "hepc_rips_airflow_1": hepc_rips_airflow_1,
+                    "hepc_irr": hepc_irr,
+                    # HEPC Features by np approx
+                    "hepc_np_sub_airflow_0": hepc_np_sub_airflow_0,
+                    "hepc_np_rips_airflow_0": hepc_np_rips_airflow_0,
+                    "hepc_np_rips_airflow_1": hepc_np_rips_airflow_1,
+                    "hepc_np_irr": hepc_np_irr,
+                    # FFT Features
+                    "fft_sub_airflow_0": fft_sub_airflow_0,
+                    "fft_rips_airflow_0": fft_rips_airflow_0,
+                    "fft_rips_airflow_1": fft_rips_airflow_1,
+                    "fft_irr": fft_irr,
+                    # Classic Features
+                    "breath_cycle_1_epoch": breath_cycle_1_epoch,
+                    "resp_vol_25_epoch_cent": resp_vol_25_epoch_cent,
+                    "power_25_epoch_cent": power_25_epoch_cent,
+                    "breath_cycle_6_epoch": breath_cycle_6_epoch,
+                    "resp_vol_6_epoch": resp_vol_6_epoch,
+                    "power_6_epoch": power_6_epoch,
+                    # Label/SQI
                     "label": interval_data,
                     "sqi": sqi,
-                    "irr_sublevel": sublevel_dgms_irr,
-                    "airflow_sublevel": sublevel_dgms_airflow,
-                    "airflow_rips": rips_dgms_airflow,
+                    # Diagrams
+                    #  "irr_sublevel": sublevel_dgms_irr,
+                    #  "airflow_sublevel": sublevel_dgms_airflow,
+                    #  "airflow_rips": rips_dgms_airflow,
                 }
             )
 
             dgms_dict["irr_sublevel"].append(sublevel_dgms_irr)
             dgms_dict["airflow_sublevel"].append(sublevel_dgms_airflow)
             dgms_dict["airflow_rips"].append(rips_dgms_airflow)
-
-        tda_feat_arr = np.stack([x["TDA"] for x in data])
-        classic_feat_arr = np.stack([x["classic"] for x in data])
-        sqi_arr = np.stack([x["sqi"] for x in data])
 
         label_df = pd.concat([x["label"] for x in data], axis=1).T
         label_df = label_df.drop("interval", axis=1)
@@ -402,9 +413,10 @@ class AirflowSignalProcessor:
 
         # Saving h5py File
         with h5py.File(self.save_fname_hdf5, "a") as f:
-            f.create_dataset("tda_feature", data=tda_feat_arr)
-            f.create_dataset("classic_feature", data=classic_feat_arr)
-            f.create_dataset("sqi", data=sqi_arr)
+            keys = data[0].keys()
+            for k in keys:
+                if k != "label":
+                    f.create_dataset(k, data=np.stack([x[k] for x in data]))
         label_df.to_hdf(self.save_fname_hdf5, key=f"label")
 
         #  Saving pkl file with dgms
@@ -508,10 +520,35 @@ class AirflowSignalProcessor:
         feat = np.asarray(feat)
         return feat
 
+    def calculate_persistence_curve(
+        self,
+        dgm: np.ndarray,
+    ) -> typing.Tuple[np.ndarray, np.ndarray]:
+        dgm_clean = dgm[~np.isinf(dgm).any(1)]
+        psi_dgms = tda_utils.psi(dgm_clean)
+        x = np.linspace(0, dgm_clean.max(), 1000)
+        y = np.zeros(x.shape)
+
+        for idx, (b, d) in enumerate(dgm_clean):
+            arr_idx = (x >= b) & (x <= d)
+            y[arr_idx] += psi_dgms[idx]
+        return x, y
+
+    def hepc_np(self, dgm: np.ndarray) -> np.ndarray:
+        dgm_clean = dgm[~np.isinf(dgm).any(1)]
+        x, pc = self.calculate_persistence_curve(dgm_clean)
+        alpha_h, _ = np.polynomial.hermite.hermfit(x, pc, deg=14, full=True)
+        return alpha_h
+
     def hepc(self, dgm: np.ndarray) -> np.ndarray:
         dgm_clean = dgm[~np.isinf(dgm).any(1)]
         hepc_feat = tda_utils.hepc(dgm_clean)
         return hepc_feat
+
+    def fft_pc(self, dgm: np.ndarray) -> np.ndarray:
+        dgm_clean = dgm[~np.isinf(dgm).any(1)]
+        fft_feat = tda_utils.fft_pc(dgm_clean)
+        return fft_feat
 
     def classic_features_breath_cycle(
         self, arr: np.ndarray, sfreq: float
@@ -771,7 +808,7 @@ class AirflowSignalProcessor:
         return feat_arr
 
     def classic_features_motion(self, arr: np.ndarray, sfreq: float) -> np.ndarray:
-        pass
+        raise NotImplementedError()
 
 
 def process_idx(idx):
@@ -785,7 +822,7 @@ def process_idx(idx):
     pt_id = pt_ids[idx]
     #  pt_id = "7612_21985"
 
-    save_dir = "/work/thesathlab/manjunath.sh/tda_sleep_staging_ptaf_dgms/"
+    save_dir = "/work/thesathlab/manjunath.sh/tda_sleep_staging_features/"
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
 

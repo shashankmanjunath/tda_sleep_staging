@@ -1,4 +1,5 @@
 from itertools import combinations
+import typing
 
 from fire import Fire
 
@@ -6,14 +7,12 @@ import scipy
 import wandb
 
 
-def ttest_xgb(run_1: str, run_2: str, run_3: str):
+def ttest_xgb(run_ids: typing.List[str]):
     api = wandb.Api()
 
-    run_1_data = api.run(f"shashankmanjunath/tda_airflow_sleep_staging/{run_1}")
-    run_2_data = api.run(f"shashankmanjunath/tda_airflow_sleep_staging/{run_2}")
-    run_3_data = api.run(f"shashankmanjunath/tda_airflow_sleep_staging/{run_3}")
-
-    runs = [run_1_data, run_2_data, run_3_data]
+    runs = []
+    for run_id in run_ids:
+        runs.append(api.run(f"shashankmanjunath/tda_airflow_sleep_staging/{run_id}"))
 
     data = {}
     for run in runs:
@@ -29,7 +28,8 @@ def ttest_xgb(run_1: str, run_2: str, run_3: str):
     combos = list(combinations(experiments, 2))
 
     for exp0, exp1 in combos:
-        ttest_res = scipy.stats.ttest_ind(
+        #  ttest_res = scipy.stats.ttest_ind(
+        ttest_res = scipy.stats.ranksums(
             data[exp0],
             data[exp1],
             alternative="two-sided",
@@ -39,7 +39,32 @@ def ttest_xgb(run_1: str, run_2: str, run_3: str):
 
 if __name__ == "__main__":
     ttest_xgb(
-        run_1="a9cqryo0",
-        run_2="vfvj6x8g",
-        run_3="zak66wpy",
+        [
+            # TDA
+            #  "p1i9pxcp",
+            # Classic
+            #  "ymo98u6p",
+            # All
+            #  "ykjcjg4m",
+            # HEPC
+            #  "f6vlxoiu",
+            # FFT, Abs
+            "kz4vsd2c",
+            # FFT, RI
+            "eimu4xfi",
+            # TDA using FFT, Abs
+            #  "x2qe14bq",
+            #  TDA using FFT, RI
+            #  "xovhgjn8",
+            # All using FFT, Abs
+            #  "zb1b8u2w",
+            # All using FFT, RI
+            #  "z2qjmkj4",
+            # All Homology using FFT, Abs
+            #  "3xx1vbha",
+            # All Homology using FFT, RI
+            #  "1i6rtsrs",
+            # All Homology using HEPC
+            #  "l399acqj",
+        ]
     )

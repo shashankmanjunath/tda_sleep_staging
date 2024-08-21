@@ -78,34 +78,388 @@ def load_data_hdf5(
     sqi_thresh: float,
 ) -> typing.Tuple[dict, dict]:
     """Helper function to load data saved in hdf5 files"""
+    n_feat = 15
     data = {}
     label = {}
 
     for fname in tqdm(fnames_list):
-        fname_label = pd.read_hdf(fname, key="label")
-        label_arr = fname_label["description"].to_numpy()
         with h5py.File(fname, "r") as f:
             # Loading data
             if feature_name == "all":
-                data_arr_tda = f["tda_feature"][()]
-                data_arr_classic = f["classic_feature"][()]
-                data_arr = np.concatenate((data_arr_tda, data_arr_classic), axis=-1)
-            elif feature_name == "hepc":
-                data_arr_tda = f["tda_feature"][()]
-                hepc_sub_airflow_0 = data_arr_tda[:, 11:26]
-                hepc_rips_airflow_0 = data_arr_tda[:, 26:41]
-                hepc_irr = data_arr_tda[:, -15:]
-                data_arr = np.concatenate(
-                    (
-                        hepc_sub_airflow_0,
-                        hepc_rips_airflow_0,
-                        hepc_irr,
-                    ),
+                data_arr_tda = np.concatenate(
+                    [
+                        f["ps_sub_airflow_0"][()],
+                        f["hepc_sub_airflow_0"][()],
+                        f["hepc_rips_airflow_0"][()],
+                        f["ps_rips_airflow_1"][()],
+                        f["ps_irr"][()],
+                        f["hepc_irr"][()],
+                    ],
                     axis=-1,
                 )
+
+                data_arr_classic = np.concatenate(
+                    [
+                        f["breath_cycle_1_epoch"][()],
+                        f["resp_vol_25_epoch_cent"][()],
+                        f["power_25_epoch_cent"][()],
+                    ]
+                )
+                data_arr = np.concatenate((data_arr_tda, data_arr_classic), axis=-1)
+            elif feature_name == "all_fft":
+                data_arr_tda = np.concatenate(
+                    [
+                        f["ps_sub_airflow_0"][()],
+                        np.abs(f["fft_sub_airflow_0"][()][:, :n_feat]),
+                        np.abs(f["fft_rips_airflow_0"][()][:, :n_feat]),
+                        f["ps_rips_airflow_1"][()],
+                        f["ps_irr"][()],
+                        np.abs(f["fft_irr"][()][:, :n_feat]),
+                    ],
+                    axis=-1,
+                )
+
+                data_arr_classic = np.concatenate(
+                    [
+                        f["breath_cycle_1_epoch"][()],
+                        f["resp_vol_25_epoch_cent"][()],
+                        f["power_25_epoch_cent"][()],
+                    ]
+                )
+                data_arr = np.concatenate((data_arr_tda, data_arr_classic), axis=-1)
+            elif feature_name == "all_fft_ri":
+                data_arr_tda = np.concatenate(
+                    [
+                        f["ps_sub_airflow_0"][()],
+                        np.real(f["fft_sub_airflow_0"][:, :n_feat]),
+                        np.imag(f["fft_sub_airflow_0"][:, :n_feat]),
+                        np.real(f["fft_rips_airflow_0"][:, :n_feat]),
+                        np.imag(f["fft_rips_airflow_0"][:, :n_feat]),
+                        f["ps_rips_airflow_1"][()],
+                        f["ps_irr"][()],
+                        np.real(f["fft_irr"][:, :n_feat]),
+                        np.imag(f["fft_irr"][:, :n_feat]),
+                    ],
+                    axis=-1,
+                )
+
+                data_arr_classic = np.concatenate(
+                    [
+                        f["breath_cycle_1_epoch"][()],
+                        f["resp_vol_25_epoch_cent"][()],
+                        f["power_25_epoch_cent"][()],
+                    ]
+                )
+                data_arr = np.concatenate((data_arr_tda, data_arr_classic), axis=-1)
+            elif feature_name == "ps":
+                data_arr = np.concatenate(
+                    [
+                        f["ps_sub_airflow_0"][()],
+                        f["ps_rips_airflow_1"][()],
+                        f["ps_irr"][()],
+                    ],
+                    axis=-1,
+                )
+            elif feature_name == "tda":
+                data_arr = np.concatenate(
+                    [
+                        f["ps_sub_airflow_0"][()],
+                        f["hepc_sub_airflow_0"][()],
+                        f["hepc_rips_airflow_0"][()],
+                        f["ps_rips_airflow_1"][()],
+                        f["ps_irr"][()],
+                        f["hepc_irr"][()],
+                    ],
+                    axis=-1,
+                )
+            elif feature_name == "tda_fft":
+                data_arr = np.concatenate(
+                    [
+                        f["ps_sub_airflow_0"][()],
+                        np.abs(f["fft_sub_airflow_0"][()][:, :n_feat]),
+                        np.abs(f["fft_rips_airflow_0"][()][:, :n_feat]),
+                        f["ps_rips_airflow_1"][()],
+                        f["ps_irr"][()],
+                        np.abs(f["fft_irr"][()][:, :n_feat]),
+                    ],
+                    axis=-1,
+                )
+            elif feature_name == "tda_fft_ri":
+                data_arr = np.concatenate(
+                    [
+                        f["ps_sub_airflow_0"][()],
+                        np.real(f["fft_sub_airflow_0"][:, :n_feat]),
+                        np.imag(f["fft_sub_airflow_0"][:, :n_feat]),
+                        np.real(f["fft_rips_airflow_0"][:, :n_feat]),
+                        np.imag(f["fft_rips_airflow_0"][:, :n_feat]),
+                        f["ps_rips_airflow_1"][()],
+                        f["ps_irr"][()],
+                        np.real(f["fft_irr"][:, :n_feat]),
+                        np.imag(f["fft_irr"][:, :n_feat]),
+                    ],
+                    axis=-1,
+                )
+            elif feature_name == "classic":
+                data_arr_classic = np.concatenate(
+                    [
+                        f["breath_cycle_1_epoch"][()],
+                        f["resp_vol_25_epoch_cent"][()],
+                        f["power_25_epoch_cent"][()],
+                    ]
+                )
+            elif feature_name == "classic_hepc":
+                data_arr_tda = np.concatenate(
+                    [
+                        f["hepc_sub_airflow_0"][()],
+                        f["hepc_rips_airflow_0"][()],
+                        f["hepc_irr"][()],
+                    ],
+                    axis=-1,
+                )
+
+                data_arr_classic = np.concatenate(
+                    [
+                        f["breath_cycle_1_epoch"][()],
+                        f["resp_vol_25_epoch_cent"][()],
+                        f["power_25_epoch_cent"][()],
+                    ]
+                )
+                data_arr = np.concatenate((data_arr_tda, data_arr_classic), axis=-1)
+            elif feature_name == "classic_fft":
+                data_arr_tda = np.concatenate(
+                    [
+                        np.abs(f["fft_sub_airflow_0"][()][:, :n_feat]),
+                        np.abs(f["fft_rips_airflow_0"][()][:, :n_feat]),
+                        np.abs(f["fft_irr"][()][:, :n_feat]),
+                    ],
+                    axis=-1,
+                )
+
+                data_arr_classic = np.concatenate(
+                    [
+                        f["breath_cycle_1_epoch"][()],
+                        f["resp_vol_25_epoch_cent"][()],
+                        f["power_25_epoch_cent"][()],
+                    ]
+                )
+                data_arr = np.concatenate((data_arr_tda, data_arr_classic), axis=-1)
+            elif feature_name == "classic_fft_ri":
+                data_arr_tda = np.concatenate(
+                    [
+                        np.real(f["fft_sub_airflow_0"][:, :n_feat]),
+                        np.imag(f["fft_sub_airflow_0"][:, :n_feat]),
+                        np.real(f["fft_rips_airflow_0"][:, :n_feat]),
+                        np.imag(f["fft_rips_airflow_0"][:, :n_feat]),
+                        np.real(f["fft_irr"][:, :n_feat]),
+                        np.imag(f["fft_irr"][:, :n_feat]),
+                    ],
+                    axis=-1,
+                )
+
+                data_arr_classic = np.concatenate(
+                    [
+                        f["breath_cycle_1_epoch"][()],
+                        f["resp_vol_25_epoch_cent"][()],
+                        f["power_25_epoch_cent"][()],
+                    ]
+                )
+                data_arr = np.concatenate((data_arr_tda, data_arr_classic), axis=-1)
+            elif feature_name == "classic_hepc_full":
+                data_arr_tda = np.concatenate(
+                    [
+                        f["hepc_sub_airflow_0"][()],
+                        f["hepc_rips_airflow_0"][()],
+                        f["hepc_rips_airflow_1"][()],
+                        f["hepc_irr"][()],
+                    ],
+                    axis=-1,
+                )
+                data_arr_classic = np.concatenate(
+                    [
+                        f["breath_cycle_1_epoch"][()],
+                        f["resp_vol_25_epoch_cent"][()],
+                        f["power_25_epoch_cent"][()],
+                    ]
+                )
+                data_arr = np.concatenate((data_arr_tda, data_arr_classic), axis=-1)
+            elif feature_name == "classic_fft_full":
+                data_arr_tda = np.concatenate(
+                    [
+                        np.abs(f["fft_sub_airflow_0"][:, :n_feat]),
+                        np.abs(f["fft_rips_airflow_0"][:, :n_feat]),
+                        np.abs(f["fft_rips_airflow_1"][:, :n_feat]),
+                        np.abs(f["fft_irr"][:, :n_feat]),
+                    ],
+                    axis=-1,
+                )
+                data_arr_classic = np.concatenate(
+                    [
+                        f["breath_cycle_1_epoch"][()],
+                        f["resp_vol_25_epoch_cent"][()],
+                        f["power_25_epoch_cent"][()],
+                    ]
+                )
+                data_arr = np.concatenate((data_arr_tda, data_arr_classic), axis=-1)
+            elif feature_name == "classic_fft_full_ri":
+                data_arr_tda = np.concatenate(
+                    [
+                        np.real(f["fft_sub_airflow_0"][:, :n_feat]),
+                        np.imag(f["fft_sub_airflow_0"][:, :n_feat]),
+                        np.real(f["fft_rips_airflow_0"][:, :n_feat]),
+                        np.imag(f["fft_rips_airflow_0"][:, :n_feat]),
+                        np.real(f["fft_rips_airflow_1"][:, :n_feat]),
+                        np.imag(f["fft_rips_airflow_1"][:, :n_feat]),
+                        np.real(f["fft_irr"][:, :n_feat]),
+                        np.imag(f["fft_irr"][:, :n_feat]),
+                    ],
+                    axis=-1,
+                )
+                data_arr_classic = np.concatenate(
+                    [
+                        f["breath_cycle_1_epoch"][()],
+                        f["resp_vol_25_epoch_cent"][()],
+                        f["power_25_epoch_cent"][()],
+                    ]
+                )
+                data_arr = np.concatenate((data_arr_tda, data_arr_classic), axis=-1)
+            elif feature_name == "hepc":
+                data_arr = np.concatenate(
+                    [
+                        f["hepc_sub_airflow_0"][()],
+                        f["hepc_rips_airflow_0"][()],
+                        f["hepc_irr"][()],
+                    ],
+                    axis=-1,
+                )
+            elif feature_name == "hepc_full":
+                data_arr = np.concatenate(
+                    [
+                        f["hepc_sub_airflow_0"][()],
+                        f["hepc_rips_airflow_0"][()],
+                        f["hepc_rips_airflow_1"][()],
+                        f["hepc_irr"][()],
+                    ],
+                    axis=-1,
+                )
+            elif feature_name == "fft":
+                data_arr = np.concatenate(
+                    [
+                        np.abs(f["fft_sub_airflow_0"][:, :n_feat]),
+                        np.abs(f["fft_rips_airflow_0"][:, :n_feat]),
+                        np.abs(f["fft_irr"][:, :n_feat]),
+                    ],
+                    axis=-1,
+                )
+            elif feature_name == "fft_ri":
+                data_arr = np.concatenate(
+                    [
+                        np.real(f["fft_sub_airflow_0"][:, :n_feat]),
+                        np.imag(f["fft_sub_airflow_0"][:, :n_feat]),
+                        np.real(f["fft_rips_airflow_0"][:, :n_feat]),
+                        np.imag(f["fft_rips_airflow_0"][:, :n_feat]),
+                        np.real(f["fft_irr"][:, :n_feat]),
+                        np.imag(f["fft_irr"][:, :n_feat]),
+                    ],
+                    axis=-1,
+                )
+            elif feature_name == "fft_full":
+                data_arr = np.concatenate(
+                    [
+                        np.abs(f["fft_sub_airflow_0"][:, :n_feat]),
+                        np.abs(f["fft_rips_airflow_0"][:, :n_feat]),
+                        np.abs(f["fft_rips_airflow_1"][:, :n_feat]),
+                        np.abs(f["fft_irr"][:, :n_feat]),
+                    ],
+                    axis=-1,
+                )
+            elif feature_name == "fft_full_ri":
+                data_arr = np.concatenate(
+                    [
+                        np.real(f["fft_sub_airflow_0"][:, :n_feat]),
+                        np.imag(f["fft_sub_airflow_0"][:, :n_feat]),
+                        np.real(f["fft_rips_airflow_0"][:, :n_feat]),
+                        np.imag(f["fft_rips_airflow_0"][:, :n_feat]),
+                        np.real(f["fft_rips_airflow_1"][:, :n_feat]),
+                        np.imag(f["fft_rips_airflow_1"][:, :n_feat]),
+                        np.real(f["fft_irr"][:, :n_feat]),
+                        np.imag(f["fft_irr"][:, :n_feat]),
+                    ],
+                    axis=-1,
+                )
+            elif feature_name == "classic_single_epoch":
+                data_arr = np.concatenate(
+                    [
+                        f["breath_cycle_1_epoch"][()],
+                    ],
+                    axis=-1,
+                )
+            elif feature_name == "classic_single_epoch_hepc":
+                data_arr = np.concatenate(
+                    [
+                        f["breath_cycle_1_epoch"][()],
+                        f["hepc_sub_airflow_0"][()],
+                        f["hepc_rips_airflow_0"][()],
+                        f["hepc_irr"][()],
+                    ],
+                    axis=-1,
+                )
+            elif feature_name == "classic_single_epoch_fft":
+                data_arr = np.concatenate(
+                    [
+                        f["breath_cycle_1_epoch"][()],
+                        np.abs(f["fft_sub_airflow_0"][:, :n_feat]),
+                        np.abs(f["fft_rips_airflow_0"][:, :n_feat]),
+                        np.abs(f["fft_irr"][:, :n_feat]),
+                    ],
+                    axis=-1,
+                )
+            elif feature_name == "classic_single_epoch_fft_ri":
+                data_arr = np.concatenate(
+                    [
+                        f["breath_cycle_1_epoch"][()],
+                        np.real(f["fft_sub_airflow_0"][:, :n_feat]),
+                        np.imag(f["fft_sub_airflow_0"][:, :n_feat]),
+                        np.real(f["fft_rips_airflow_0"][:, :n_feat]),
+                        np.imag(f["fft_rips_airflow_0"][:, :n_feat]),
+                        np.real(f["fft_irr"][:, :n_feat]),
+                        np.imag(f["fft_irr"][:, :n_feat]),
+                    ],
+                    axis=-1,
+                )
+            elif feature_name == "classic_single_epoch_hepc_full":
+                data_arr = np.concatenate(
+                    [
+                        f["breath_cycle_1_epoch"][()],
+                        f["hepc_sub_airflow_0"][()],
+                        f["hepc_rips_airflow_0"][()],
+                        f["hepc_rips_airflow_1"][()],
+                        f["hepc_irr"][()],
+                    ],
+                    axis=-1,
+                )
+            elif feature_name == "classic_single_epoch_fft_full_ri":
+                data_arr = np.concatenate(
+                    [
+                        f["breath_cycle_1_epoch"][()],
+                        np.real(f["fft_sub_airflow_0"][:, :n_feat]),
+                        np.imag(f["fft_sub_airflow_0"][:, :n_feat]),
+                        np.real(f["fft_rips_airflow_0"][:, :n_feat]),
+                        np.imag(f["fft_rips_airflow_0"][:, :n_feat]),
+                        np.real(f["fft_rips_airflow_1"][:, :n_feat]),
+                        np.imag(f["fft_rips_airflow_1"][:, :n_feat]),
+                        np.real(f["fft_irr"][:, :n_feat]),
+                        np.imag(f["fft_irr"][:, :n_feat]),
+                    ],
+                    axis=-1,
+                )
+            elif feature_name == "random":
+                data_arr = np.random.rand(*f["breath_cycle_1_epoch"].shape)
             else:
                 data_arr = f[feature_name][()]
             sqi_arr = f["sqi"][()]
+
+        fname_label = pd.read_hdf(fname, key="label")
+        label_arr = fname_label["description"].to_numpy()
 
         # Removing low SQI data
         data_arr_sqi = data_arr[sqi_arr >= sqi_thresh, :]
@@ -164,8 +518,11 @@ def load_data_pkl(
                 elif feature_name == "wavedec":
                     w_feat = calculate_wavedec(feat, n_levels=6)
                     feat_arr_sqi.append(w_feat)
-                elif feature_name == "hepc_reference":
-                    w_feat = calculate_hepc_reference(feat, n_levels=15)
+                elif feature_name == "polyfit":
+                    w_feat = calculate_polyfit(feat, n_levels=15)
+                    feat_arr_sqi.append(w_feat)
+                elif feature_name == "fft":
+                    w_feat = calculate_fft_feat(feat, n_coef=15)
                     feat_arr_sqi.append(w_feat)
                 else:
                     feat_arr_sqi.append(feat)
@@ -182,9 +539,7 @@ def load_data(
     sqi_thresh: float,
 ) -> typing.Tuple[dict, dict]:
     """Helper function to load data and labels from a list of files"""
-    if feature_name in ["tda_feature", "classic_feature", "all", "hepc"]:
-        data, label = load_data_hdf5(fnames_list, feature_name, sqi_thresh)
-    elif feature_name in [
+    if feature_name in [
         "persistence_landscape",
         "template_function",
         "cwt",
@@ -192,11 +547,11 @@ def load_data(
         "hermfit",
         "wavedec",
         "lagfit",
-        "hepc_reference",
+        "polyfit",
     ]:
         data, label = load_data_pkl(fnames_list, feature_name, sqi_thresh)
     else:
-        raise ValueError(f"Feature name {feature_name} not recognized!")
+        data, label = load_data_hdf5(fnames_list, feature_name, sqi_thresh)
     return data, label
 
 
@@ -342,38 +697,45 @@ def calculate_hermfit(data_dict: typing.Dict, n_levels: int):
     return output_arr
 
 
-def calculate_hepc_reference(data_dict: typing.Dict, n_levels: int):
-    norm = scipy.stats.norm
+def calculate_polyfit(data_dict: typing.Dict, n_levels: int):
     output_arr = []
     for k, dgm_num in proc_items.items():
         target_dgm = data_dict[k][dgm_num]
         dgm_clean = target_dgm[~np.isinf(target_dgm).any(1)]
-        b = dgm_clean[:, 0]
-        d = dgm_clean[:, 1]
+        psi_dgm = tda_utils.psi(dgm_clean)
+        if psi_dgm.size > 0:
+            x = np.linspace(0, dgm_clean.max(), 1000)
+            y = np.zeros(x.shape)
 
-        psi = tda_utils.psi(dgm_clean)
-        c = np.power(np.pi, -1.0 / 4) * np.sqrt(2 * np.pi)
+            for idx, (b, d) in enumerate(dgm_clean):
+                arr_idx = (x >= b) & (x <= d)
+                y[arr_idx] += psi_dgm[idx]
+            alpha = np.polynomial.polynomial.polyfit(x, y, deg=n_levels - 1)
+            output_arr.append(alpha)
+        else:
+            output_arr.append(np.zeros((n_levels,)))
+    output_arr = np.concatenate(output_arr, axis=-1)
+    return output_arr
 
-        alphan = np.zeros(n_levels)
-        alphan[0] = c * np.sum(psi * (norm.cdf(d) - norm.cdf(b)))
 
-        c = np.power(2, -1.0 / 2) * c
-        alphan[1] = 2 * c * np.sum(psi * (norm.pdf(b) - norm.pdf(d)))
+def calculate_fft_feat(data_dict: typing.Dict, n_coef: int):
+    output_arr = []
+    for k, dgm_num in proc_items.items():
+        target_dgm = data_dict[k][dgm_num]
+        dgm_clean = target_dgm[~np.isinf(target_dgm).any(1)]
+        psi_dgm = tda_utils.psi(dgm_clean)
+        if psi_dgm.size > 0:
+            x = np.linspace(0, dgm_clean.max(), 1000)
+            y = np.zeros(x.shape)
 
-        tempsum = 0.0
-        for i in range(2, n_levels):
-            c = np.power(2 * i, -1.0 / 2) * c
-            tempsum = np.sum(
-                psi
-                * (
-                    norm.pdf(b) * scipy.special.eval_hermite(i - 1, b)
-                    - norm.pdf(d) * scipy.special.eval_hermite(i - 1, d)
-                )
-            )
-            alphan[i] = 2 * c * tempsum + alphan[i - 2] * 2 * (i - 1) / np.sqrt(
-                4 * (i - 1) * i
-            )
-        output_arr.append(alphan)
+            for idx, (b, d) in enumerate(dgm_clean):
+                arr_idx = (x >= b) & (x <= d)
+                y[arr_idx] += psi_dgm[idx]
+            coef = np.fft.rfft(y)
+            alpha = coef[:n_coef]
+            output_arr.append(np.abs(alpha))
+        else:
+            output_arr.append(np.zeros((n_coef,)))
     output_arr = np.concatenate(output_arr, axis=-1)
     return output_arr
 
