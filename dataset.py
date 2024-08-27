@@ -312,27 +312,27 @@ class AirflowSignalProcessor:
 
             ps_irr = self.persistence_summary(sublevel_dgms_irr[0])
             hepc_irr = self.hepc(sublevel_dgms_irr[0])
-            hepc_np_irr = self.hepc_np(sublevel_dgms_irr[0])
             fft_irr = self.fft_pc(sublevel_dgms_irr[0])
+            fft_cf_irr = self.fft_closed_form(sublevel_dgms_irr[0])
 
             # Applying time-delay embedding and Rips filtration to airflow
             # signal
             rips_dgms_airflow = self.rips_filtration(data_arr, sfreq)
             hepc_rips_airflow_0 = self.hepc(rips_dgms_airflow[0])
             hepc_rips_airflow_1 = self.hepc(rips_dgms_airflow[1])
-            hepc_np_rips_airflow_0 = self.hepc_np(rips_dgms_airflow[0])
-            hepc_np_rips_airflow_1 = self.hepc_np(rips_dgms_airflow[1])
             ps_rips_airflow_0 = self.persistence_summary(rips_dgms_airflow[0])
             ps_rips_airflow_1 = self.persistence_summary(rips_dgms_airflow[1])
             fft_rips_airflow_0 = self.fft_pc(rips_dgms_airflow[0])
             fft_rips_airflow_1 = self.fft_pc(rips_dgms_airflow[1])
+            fft_cf_rips_airflow_0 = self.fft_closed_form(rips_dgms_airflow[0])
+            fft_cf_rips_airflow_1 = self.fft_closed_form(rips_dgms_airflow[1])
 
             # Sublevel set filtration of airflow signal
             sublevel_dgms_airflow = self.sublevel_set_filtration(data_arr)
             hepc_sub_airflow_0 = self.hepc(sublevel_dgms_airflow[0])
-            hepc_np_sub_airflow_0 = self.hepc_np(sublevel_dgms_airflow[0])
             ps_sub_airflow_0 = self.persistence_summary(sublevel_dgms_airflow[0])
             fft_sub_airflow_0 = self.fft_pc(sublevel_dgms_airflow[0])
+            fft_cf_sub_airflow_0 = self.fft_closed_form(sublevel_dgms_airflow[0])
 
             # Calculating Non-TDA Features
             # 1 Epoch Features
@@ -371,16 +371,16 @@ class AirflowSignalProcessor:
                     "hepc_rips_airflow_0": hepc_rips_airflow_0,
                     "hepc_rips_airflow_1": hepc_rips_airflow_1,
                     "hepc_irr": hepc_irr,
-                    # HEPC Features by np approx
-                    "hepc_np_sub_airflow_0": hepc_np_sub_airflow_0,
-                    "hepc_np_rips_airflow_0": hepc_np_rips_airflow_0,
-                    "hepc_np_rips_airflow_1": hepc_np_rips_airflow_1,
-                    "hepc_np_irr": hepc_np_irr,
                     # FFT Features
                     "fft_sub_airflow_0": fft_sub_airflow_0,
                     "fft_rips_airflow_0": fft_rips_airflow_0,
                     "fft_rips_airflow_1": fft_rips_airflow_1,
                     "fft_irr": fft_irr,
+                    # FFT Closed-Form
+                    "fft_cf_sub_airflow_0": fft_cf_sub_airflow_0,
+                    "fft_cf_rips_airflow_0": fft_cf_rips_airflow_0,
+                    "fft_cf_rips_airflow_1": fft_cf_rips_airflow_1,
+                    "fft_cf_irr": fft_cf_irr,
                     # Classic Features
                     "breath_cycle_1_epoch": breath_cycle_1_epoch,
                     "resp_vol_25_epoch_cent": resp_vol_25_epoch_cent,
@@ -391,13 +391,11 @@ class AirflowSignalProcessor:
                     # Label/SQI
                     "label": interval_data,
                     "sqi": sqi,
-                    # Diagrams
-                    #  "irr_sublevel": sublevel_dgms_irr,
-                    #  "airflow_sublevel": sublevel_dgms_airflow,
-                    #  "airflow_rips": rips_dgms_airflow,
                 }
             )
 
+            # Diagrams -- placed in .pkl file since they have inconsistence
+            # sizes
             dgms_dict["irr_sublevel"].append(sublevel_dgms_irr)
             dgms_dict["airflow_sublevel"].append(sublevel_dgms_airflow)
             dgms_dict["airflow_rips"].append(rips_dgms_airflow)
@@ -534,12 +532,6 @@ class AirflowSignalProcessor:
             y[arr_idx] += psi_dgms[idx]
         return x, y
 
-    def hepc_np(self, dgm: np.ndarray) -> np.ndarray:
-        dgm_clean = dgm[~np.isinf(dgm).any(1)]
-        x, pc = self.calculate_persistence_curve(dgm_clean)
-        alpha_h, _ = np.polynomial.hermite.hermfit(x, pc, deg=14, full=True)
-        return alpha_h
-
     def hepc(self, dgm: np.ndarray) -> np.ndarray:
         dgm_clean = dgm[~np.isinf(dgm).any(1)]
         hepc_feat = tda_utils.hepc(dgm_clean)
@@ -548,6 +540,11 @@ class AirflowSignalProcessor:
     def fft_pc(self, dgm: np.ndarray) -> np.ndarray:
         dgm_clean = dgm[~np.isinf(dgm).any(1)]
         fft_feat = tda_utils.fft_pc(dgm_clean)
+        return fft_feat
+
+    def fft_closed_form(self, dgm: np.ndarray) -> np.ndarray:
+        dgm_clean = dgm[~np.isinf(dgm).any(1)]
+        fft_feat = tda_utils.fft_closed_form(dgm_clean)
         return fft_feat
 
     def classic_features_breath_cycle(

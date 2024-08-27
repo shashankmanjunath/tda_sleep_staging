@@ -1,3 +1,4 @@
+from collections import defaultdict
 import typing
 import os
 
@@ -16,8 +17,24 @@ import tda_utils
 import utils
 
 
+def get_unique_subjects(fnames: typing.List) -> typing.List:
+    studies_dict = defaultdict(list)
+
+    for fname in fnames:
+        pt_id, study_id = fname.split("_")
+        studies_dict[pt_id].append(study_id)
+
+    unique_fnames = []
+    for k, v in studies_dict.items():
+        # Always choose first study_id in list
+        chosen_study_id = v[0]
+        unique_fnames.append(f"{k}_{chosen_study_id}")
+    return unique_fnames
+
+
 def train(data_dir: str, feature_name: str, use_wandb: bool = False):
     subject_fnames = [x for x in os.listdir(data_dir) if x.endswith(".hdf5")]
+    subject_fnames = get_unique_subjects(subject_fnames)
     #  subject_fnames = subject_fnames[:50]
 
     all_paths = np.asarray([os.path.join(data_dir, x) for x in subject_fnames])
@@ -57,6 +74,8 @@ def train(data_dir: str, feature_name: str, use_wandb: bool = False):
         random_state=kf_seed,
         shuffle=True,
     )
+
+    #  print("Using standard kfold!")
     #  kf = sklearn.model_selection.KFold(
     #      n_splits=n_splits,
     #      random_state=kf_seed,

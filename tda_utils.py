@@ -2,6 +2,7 @@ from collections import defaultdict
 import typing
 import math
 
+from hermite_functions import hermite_functions
 from teaspoon.ML import feature_functions
 from teaspoon.ML import Base
 
@@ -184,7 +185,7 @@ def psi(dgms: np.ndarray) -> np.ndarray:
     return -val * np.log(val)
 
 
-def hepc(dgms: np.ndarray) -> np.ndarray:
+def hepc(dgms: np.ndarray, n_coef=15) -> np.ndarray:
     """Calculates the Hermite function expansion of persistence curve (HEPC)"""
     b = dgms[:, 0]
     d = dgms[:, 1]
@@ -195,27 +196,26 @@ def hepc(dgms: np.ndarray) -> np.ndarray:
     rv_val_pdf_bd = rv_gen.pdf(b) - rv_gen.pdf(d)
 
     coeff = np.sqrt(2) * np.power(np.pi, 0.25)
-    alpha = []
-    alpha.append(np.sum(coeff * psi_dgms * rv_val_cdf_db))
-    alpha.append(np.sum(2 * np.power(np.pi, 0.25) * psi_dgms * rv_val_pdf_bd))
+    alphas = []
+    alphas.append(np.sum(coeff * psi_dgms * rv_val_cdf_db))
+    alphas.append(np.sum(2 * np.power(np.pi, 0.25) * psi_dgms * rv_val_pdf_bd))
 
-    for n in range(2, 15):
+    for n in range(2, n_coef):
         # Indexing starts from 1 before current n
         n_index = n - 1
 
         coeff_i = np.sqrt(2) / np.sqrt(n_index + 1)
-        const_i = (n_index * alpha[n_index - 1]) / np.sqrt(n_index * (n_index + 1))
-        cn = np.sqrt(2 * np.pi) / np.sqrt(
-            np.power(2.0, n_index) * math.factorial(n_index) * np.sqrt(np.pi)
-        )
+        const_i = (n_index * alphas[n_index - 1]) / np.sqrt(n_index * (n_index + 1))
 
-        hfunc = scipy.special.hermite(n_index)
-        hdiff = cn * (rv_gen.pdf(b) * hfunc(b) - rv_gen.pdf(d) * hfunc(d))
+        hfunc_b = hermite_functions(n, b, all_n=False)
+        hfunc_d = hermite_functions(n, d, all_n=False)
+        hdiff = hfunc_b - hfunc_d
         val_i = psi_dgms * hdiff
 
-        alpha.append((coeff_i * np.sum(val_i)) + const_i)
-    alpha = np.asarray(alpha)
-    return alpha
+        alphas.append((coeff_i * np.sum(val_i)) + const_i)
+
+    alphas = np.asarray(alphas)
+    return alphas
 
 
 def fft_pc(dgms: np.ndarray) -> np.ndarray:
@@ -228,6 +228,27 @@ def fft_pc(dgms: np.ndarray) -> np.ndarray:
         y[arr_idx] += psi_dgm[idx]
     alpha = np.fft.rfft(y)
     return alpha
+
+
+def fft_closed_form(dgms: np.ndarray) -> np.ndarray:
+    max_coef = 502
+    L = np.max(dgms)
+    psi_dgms = psi(dgms)
+
+    b = dgms[:, 0]
+    d = dgms[:, 1]
+    beta = []
+
+    # Calculating 0 coefficient
+    beta.append(np.sum(psi_dgms * (d - b)) / L)
+
+    for n in range(1, max_coef):
+        bval = 2 * 1.0j * np.pi * b * n / L
+        dval = 2 * 1.0j * np.pi * d * n / L
+        diff = np.exp(bval) - np.exp(dval)
+        val = diff * 1.0j * L / (2 * np.pi * n)
+        beta.append(np.sum(psi_dgms * val) / L)
+    return np.asarray(beta)
 
 
 def h(t):

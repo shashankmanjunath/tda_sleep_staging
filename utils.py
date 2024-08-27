@@ -331,6 +331,15 @@ def load_data_hdf5(
                     ],
                     axis=-1,
                 )
+            elif feature_name == "hepc_np":
+                data_arr = np.concatenate(
+                    [
+                        f["hepc_np_sub_airflow_0"][()],
+                        f["hepc_np_rips_airflow_0"][()],
+                        f["hepc_np_irr"][()],
+                    ],
+                    axis=-1,
+                )
             elif feature_name == "hepc_full":
                 data_arr = np.concatenate(
                     [
