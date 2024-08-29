@@ -534,7 +534,10 @@ class AirflowSignalProcessor:
 
     def hepc(self, dgm: np.ndarray) -> np.ndarray:
         dgm_clean = dgm[~np.isinf(dgm).any(1)]
-        hepc_feat = tda_utils.hepc(dgm_clean)
+
+        # Scaling centered to 0 and on range with max [-5, 5]
+        dgm_clean_t = dgm_clean * (5 / np.abs(dgm_clean).max())
+        hepc_feat = tda_utils.hepc(dgm_clean_t)
         return hepc_feat
 
     def fft_pc(self, dgm: np.ndarray) -> np.ndarray:

@@ -48,13 +48,12 @@ class ResidualCalculator(dataset.AirflowSignalProcessor):
                 for idx, dgm_idx in enumerate(tqdm(dgm_list, desc=dgm_name)):
                     for h in h_list:
                         dgm = dgm_idx[h]
-                        x, pc = self.calculate_persistence_curve(dgm)
                         for approx_type in self.approx_types:
                             if dgm_name == "sub_irr":
                                 coefs = f[f"{approx_type}_irr"][idx]
                             else:
                                 coefs = f[f"{approx_type}_{dgm_name}_{h}"][idx]
-                            res = self.calculate_res(x, pc, coefs, approx_type)
+                            res = self.calculate_res(dgm, coefs, approx_type)
                             res_result_dict[dgm_name][h][approx_type].append(res)
         return res_result_dict
 
@@ -83,10 +82,15 @@ class ResidualCalculator(dataset.AirflowSignalProcessor):
     def calculate_persistence_curve(
         self,
         dgm: np.ndarray,
+        scale: bool = False,
     ) -> typing.Tuple[np.ndarray, np.ndarray]:
         dgm_clean = dgm[~np.isinf(dgm).any(1)]
+
+        if scale:
+            dgm_clean = dgm_clean * (5 / np.abs(dgm_clean).max())
+
         psi_dgms = tda_utils.psi(dgm_clean)
-        x = np.linspace(0, dgm_clean.max(), 1000)
+        x = np.linspace(dgm_clean.min(), dgm_clean.max(), 1000)
         y = np.zeros(x.shape)
 
         for idx, (b, d) in enumerate(dgm_clean):
@@ -96,14 +100,15 @@ class ResidualCalculator(dataset.AirflowSignalProcessor):
 
     def calculate_res(
         self,
-        x: np.ndarray,
-        pc: np.ndarray,
+        dgm: np.ndarray,
         coefs: np.ndarray,
         approx_type: str,
     ) -> float:
         if approx_type == "fft":
+            x, pc = self.calculate_persistence_curve(dgm, scale=False)
             res = self.calculate_fft_residual(pc, fft_coef=coefs)
         elif approx_type == "hepc":
+            x, pc = self.calculate_persistence_curve(dgm, scale=True)
             res = self.calculate_hepc_residual(x, pc, hepc_coef=coefs)
         else:
             raise RuntimeError("Approximation type not recognized!")

@@ -1,6 +1,5 @@
 from collections import defaultdict
 import typing
-import math
 
 from hermite_functions import hermite_functions
 from teaspoon.ML import feature_functions
@@ -9,10 +8,8 @@ from teaspoon.ML import Base
 import gudhi.representations
 import scipy.special
 import pandas as pd
-import gtda.diagrams
 import scipy.stats
 import numpy as np
-import persim
 
 import time
 
@@ -232,7 +229,7 @@ def fft_pc(dgms: np.ndarray) -> np.ndarray:
 
 def fft_closed_form(dgms: np.ndarray) -> np.ndarray:
     max_coef = 502
-    L = np.max(dgms)
+    L = dgms.max() - dgms.min()
     psi_dgms = psi(dgms)
 
     b = dgms[:, 0]
@@ -240,14 +237,14 @@ def fft_closed_form(dgms: np.ndarray) -> np.ndarray:
     beta = []
 
     # Calculating 0 coefficient
-    beta.append(np.sum(psi_dgms * (d - b)) / L)
+    beta.append(2 * np.sum(psi_dgms * (d - b)) / L)
 
     for n in range(1, max_coef):
         bval = 2 * 1.0j * np.pi * b * n / L
         dval = 2 * 1.0j * np.pi * d * n / L
         diff = np.exp(bval) - np.exp(dval)
         val = diff * 1.0j * L / (2 * np.pi * n)
-        beta.append(np.sum(psi_dgms * val) / L)
+        beta.append(2 * np.sum(psi_dgms * val) / L)
     return np.asarray(beta)
 
 

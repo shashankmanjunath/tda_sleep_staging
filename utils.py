@@ -395,10 +395,31 @@ def load_data_hdf5(
                     ],
                     axis=-1,
                 )
+            elif feature_name == "fft_cf_full_ri":
+                data_arr = np.concatenate(
+                    [
+                        np.real(f["fft_cf_sub_airflow_0"][:, :n_feat]),
+                        np.imag(f["fft_cf_sub_airflow_0"][:, :n_feat]),
+                        np.real(f["fft_cf_rips_airflow_0"][:, :n_feat]),
+                        np.imag(f["fft_cf_rips_airflow_0"][:, :n_feat]),
+                        np.real(f["fft_cf_rips_airflow_1"][:, :n_feat]),
+                        np.imag(f["fft_cf_rips_airflow_1"][:, :n_feat]),
+                        np.real(f["fft_cf_irr"][:, :n_feat]),
+                        np.imag(f["fft_cf_irr"][:, :n_feat]),
+                    ],
+                    axis=-1,
+                )
             elif feature_name == "classic_single_epoch":
                 data_arr = np.concatenate(
                     [
                         f["breath_cycle_1_epoch"][()],
+                    ],
+                    axis=-1,
+                )
+            elif feature_name == "classic_6_epoch":
+                data_arr = np.concatenate(
+                    [
+                        f["breath_cycle_6_epoch"][()],
                     ],
                     axis=-1,
                 )
