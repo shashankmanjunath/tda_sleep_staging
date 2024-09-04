@@ -1,7 +1,7 @@
 from itertools import combinations
 import typing
 
-from fire import Fire
+import numpy as np
 
 import scipy
 import wandb
@@ -28,43 +28,43 @@ def ttest_xgb(run_ids: typing.List[str]):
     combos = list(combinations(experiments, 2))
 
     for exp0, exp1 in combos:
-        #  ttest_res = scipy.stats.ttest_ind(
-        ttest_res = scipy.stats.ranksums(
+        ttest_res = scipy.stats.ttest_rel(
+            #  ttest_res = scipy.stats.ranksums(
             data[exp0],
             data[exp1],
             alternative="two-sided",
         )
+        print(f"{exp0}: {np.mean(data[exp0]):.3f}")
+        print(f"{exp1}: {np.mean(data[exp1]):.3f}")
         print(f"{exp0} vs. {exp1}: {ttest_res.pvalue}")
 
 
 if __name__ == "__main__":
     ttest_xgb(
         [
-            # TDA
-            #  "p1i9pxcp",
-            # Classic
-            #  "ymo98u6p",
-            # All
-            #  "ykjcjg4m",
-            # HEPC
-            #  "f6vlxoiu",
-            # FFT, Abs
-            "kz4vsd2c",
-            # FFT, RI
-            "eimu4xfi",
-            # TDA using FFT, Abs
-            #  "x2qe14bq",
-            #  TDA using FFT, RI
-            #  "xovhgjn8",
-            # All using FFT, Abs
-            #  "zb1b8u2w",
-            # All using FFT, RI
-            #  "z2qjmkj4",
-            # All Homology using FFT, Abs
-            #  "3xx1vbha",
-            # All Homology using FFT, RI
-            #  "1i6rtsrs",
-            # All Homology using HEPC
-            #  "l399acqj",
+            #  random,
+            #  "yzc3pt9o",
+            #  classic_6_epoch,
+            #  "vm8rhc7i",
+            #  hepc,
+            #  "04rgwl67",
+            #  fft,
+            #  "jh36k3qy",
+            #  fft_cf,
+            #  "9wc1fq7q",
+            #  fft_hepc,
+            #  "08ewqjlu",
+            #  fft_cf_hepc,
+            #  "h14hirh4",
+            #  classic_6_epoch_hepc,
+            #  "f0ck7bnl",
+            #  classic_6_epoch_fft,
+            #  "5c3jhkq5",
+            #  classic_6_epoch_fft_hepc,
+            #  "btnbc4c3",
+            #  classic_6_epoch_fft_cf,
+            #  "e1zcs3i5",
+            #  classic_6_epoch_fft_cf_hepc,
+            #  "q3gvisx3",
         ]
     )

@@ -1,17 +1,9 @@
-from collections import defaultdict
 import typing
 
 from hermite_functions import hermite_functions
-from teaspoon.ML import feature_functions
-from teaspoon.ML import Base
-
-import gudhi.representations
 import scipy.special
-import pandas as pd
 import scipy.stats
 import numpy as np
-
-import time
 
 
 pl_params = {
@@ -25,95 +17,6 @@ n_hom_deg = {
     "airflow_sublevel": 1,
     "airflow_rips": 2,
 }
-
-
-def apply_template_function(
-    data_dict: typing.Dict,
-    train_fnames: typing.List,
-    test_fnames: typing.List,
-) -> typing.Tuple[np.ndarray, np.ndarray]:
-    train_data = []
-    for train_fname in train_fnames:
-        train_data += data_dict[train_fname]
-
-    test_data = []
-    for test_fname in test_fnames:
-        test_data += data_dict[test_fname]
-
-    train_output_data = []
-    test_output_data = []
-
-    for k, total_hom_deg in n_hom_deg.items():
-        for h in range(total_hom_deg):
-            t1 = time.time()
-            train_data_arr = [x[k][h] for x in train_data]
-            test_data_arr = [x[k][h] for x in test_data]
-
-            # Removing inf values
-            train_clean_data = [x[~np.isinf(x).any(axis=1)] for x in train_data_arr]
-            test_clean_data = [x[~np.isinf(x).any(axis=1)] for x in test_data_arr]
-
-            df_key = f"h_{h}"
-            train_df = pd.DataFrame({df_key: train_clean_data})
-            test_df = pd.DataFrame({df_key: test_clean_data})
-
-            # Creating object to transform data
-            params = Base.ParameterBucket()
-            params.feature_function = feature_functions.interp_polynomial
-            params.d = 20
-            params.jacobi_poly = "cheb1"
-
-            params.makeAdaptivePartition(train_df, meshingScheme=None)
-
-            train_feature = Base.build_G(train_df[df_key], params)
-            test_feature = Base.build_G(test_df[df_key], params)
-
-            train_output_data.append(train_feature)
-            test_output_data.append(test_feature)
-            t2 = time.time()
-            print(f"{k}, h_{h} Time: {t2-t1}")
-    train_output_data = np.concatenate(train_output_data, axis=-1)
-    test_output_data = np.concatenate(test_output_data, axis=-1)
-    return train_output_data, test_output_data
-
-
-def convert_pd_pl_train_test(
-    data_dict: typing.Dict,
-    train_fnames: typing.List,
-    test_fnames: typing.List,
-) -> typing.Tuple[np.ndarray, np.ndarray]:
-    train_data = []
-    for train_fname in train_fnames:
-        train_data += data_dict[train_fname]
-
-    test_data = []
-    for test_fname in test_fnames:
-        test_data += data_dict[test_fname]
-
-    landscapers = defaultdict(list)
-    train_output_data = []
-    test_output_data = []
-
-    t1 = time.time()
-    for k, total_hom_deg in n_hom_deg.items():
-        for h in range(total_hom_deg):
-            train_data_arr = [x[k][h] for x in train_data]
-            test_data_arr = [x[k][h] for x in test_data]
-
-            # Removing inf values
-            train_clean_data = [x[~np.isinf(x).any(axis=1)] for x in train_data_arr]
-            test_clean_data = [x[~np.isinf(x).any(axis=1)] for x in test_data_arr]
-
-            landscapers[k].append(gudhi.representations.vector_methods.Landscape())
-            landscapers[k][h].fit(train_clean_data)
-
-            train_output_data.append(landscapers[k][h].transform(train_clean_data))
-            test_output_data.append(landscapers[k][h].transform(test_clean_data))
-    t2 = time.time()
-    #  print(f"Time: {t2-t1}")
-    train_output_data = np.concatenate(train_output_data, axis=-1)
-    test_output_data = np.concatenate(test_output_data, axis=-1)
-    return train_output_data, test_output_data
 
 
 def midlife_persistence(dgm: np.ndarray) -> np.ndarray:
@@ -217,7 +120,7 @@ def hepc(dgms: np.ndarray, n_coef=15) -> np.ndarray:
 
 def fft_pc(dgms: np.ndarray) -> np.ndarray:
     psi_dgm = psi(dgms)
-    x = np.linspace(0, dgms.max(), 1000)
+    x = np.linspace(dgms.min(), dgms.max(), 1000)
     y = np.zeros(x.shape)
 
     for idx, (b, d) in enumerate(dgms):
@@ -227,9 +130,12 @@ def fft_pc(dgms: np.ndarray) -> np.ndarray:
     return alpha
 
 
-def fft_closed_form(dgms: np.ndarray) -> np.ndarray:
+def fft_closed_form(
+    dgms: np.ndarray, L: typing.Union[float, None] = None
+) -> np.ndarray:
     max_coef = 502
-    L = dgms.max() - dgms.min()
+    if not L:
+        L = dgms.max() - dgms.min()
     psi_dgms = psi(dgms)
 
     b = dgms[:, 0]

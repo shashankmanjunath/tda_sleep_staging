@@ -1,17 +1,43 @@
+from collections import defaultdict
 import typing
 import pickle
-import math
 import os
 
 from hermite_functions import hermite_functions
 from fire import Fire
 from tqdm import tqdm
 import numpy as np
-import scipy
 import h5py
 
 import tda_utils
 import dataset
+import utils
+
+
+def get_approx_types():
+    return ["hepc", "sp_fapc", "ap_fapc"]
+
+
+approx_types_name_map = {
+    "hepc": "hepc",
+    "sp_fapc": "fft_cf",
+    "ap_fapc": "fft",
+}
+
+
+def get_unique_res_subjects(fnames: typing.List) -> typing.List:
+    studies_dict = defaultdict(list)
+
+    for fname in fnames:
+        pt_id, study_id, _ = fname.split("_")
+        studies_dict[pt_id].append(study_id)
+
+    unique_fnames = []
+    for k, v in studies_dict.items():
+        # Always choose first study_id in list
+        chosen_study_id = v[0]
+        unique_fnames.append(f"{k}_{chosen_study_id}_res.pkl")
+    return unique_fnames
 
 
 class ResidualCalculator(dataset.AirflowSignalProcessor):
@@ -31,6 +57,7 @@ class ResidualCalculator(dataset.AirflowSignalProcessor):
         self.approx_types = get_approx_types()
 
     def calculate_residual(self):
+        print(f"Subject ID: {self.pt_id}")
         res_result_dict = {
             "rips_airflow": [
                 {x: [] for x in self.approx_types},
@@ -49,16 +76,29 @@ class ResidualCalculator(dataset.AirflowSignalProcessor):
                     for h in h_list:
                         dgm = dgm_idx[h]
                         for approx_type in self.approx_types:
+                            approx_name = approx_types_name_map[approx_type]
                             if dgm_name == "sub_irr":
-                                coefs = f[f"{approx_type}_irr"][idx]
+                                coefs = f[f"{approx_name}_irr"][idx]
                             else:
-                                coefs = f[f"{approx_type}_{dgm_name}_{h}"][idx]
-                            res = self.calculate_res(dgm, coefs, approx_type)
+                                coefs = f[f"{approx_name}_{dgm_name}_{h}"][idx]
+                            dgm_key = f"{dgm_name}_h{h}".replace("sub", "sublevel")
+                            res = self.calculate_res(
+                                dgm,
+                                coefs,
+                                approx_type,
+                                dgm_key,
+                            )
                             res_result_dict[dgm_name][h][approx_type].append(res)
+
         return res_result_dict
 
-    def get_dmax(self):
+    def get_domain_stats(self) -> typing.Tuple[dict, dict]:
         dmax_result_dict = {
+            "rips_airflow": [[], []],
+            "sub_airflow": [[]],
+            "sub_irr": [[]],
+        }
+        dmin_result_dict = {
             "rips_airflow": [[], []],
             "sub_airflow": [[]],
             "sub_irr": [[]],
@@ -77,7 +117,8 @@ class ResidualCalculator(dataset.AirflowSignalProcessor):
                         dgm = dgm_idx[h]
                         dgm_clean = dgm[~np.isinf(dgm).any(1)]
                         dmax_result_dict[dgm_name][h].append(dgm_clean.max())
-        return dmax_result_dict
+                        dmin_result_dict[dgm_name][h].append(dgm_clean.min())
+        return dmin_result_dict, dmax_result_dict
 
     def calculate_persistence_curve(
         self,
@@ -103,34 +144,70 @@ class ResidualCalculator(dataset.AirflowSignalProcessor):
         dgm: np.ndarray,
         coefs: np.ndarray,
         approx_type: str,
+        dgm_key: str,
     ) -> float:
-        if approx_type == "fft":
+        if approx_type == "ap_fapc":
             x, pc = self.calculate_persistence_curve(dgm, scale=False)
-            res = self.calculate_fft_residual(pc, fft_coef=coefs)
+            res = self.calculate_ap_fapc_residual(pc, ap_fapc_coef=coefs)
+        elif approx_type == "sp_fapc":
+            x, pc = self.calculate_persistence_curve(dgm, scale=False)
+            set_domain = dataset.fapc_support[dgm_key]
+            L = set_domain[1] - set_domain[0]
+            res = self.calculate_sp_fapc_residual(x, L, pc, sp_fapc_coef=coefs)
         elif approx_type == "hepc":
-            x, pc = self.calculate_persistence_curve(dgm, scale=True)
+            dgm_scale = dataset.hepc_scale[dgm_key]
+            x, pc = self.calculate_persistence_curve(dgm * dgm_scale, scale=True)
             res = self.calculate_hepc_residual(x, pc, hepc_coef=coefs)
         else:
             raise RuntimeError("Approximation type not recognized!")
+        #  print(f"{approx_type} {dgm_key}: {res}")
         return res
 
-    def calculate_fft_residual(
+    def calculate_ap_fapc_residual(
         self,
         pc: np.ndarray,
-        fft_coef: np.ndarray,
+        ap_fapc_coef: np.ndarray,
     ) -> float:
         n_coef = 15
-        coef_app = fft_coef[:n_coef]
-        approx = self.fft_pc_approx(pc, coef_app)
+        coef_app = ap_fapc_coef[:n_coef]
+        approx = self.ap_fapc_approx(pc, coef_app)
         return self.res(approx, pc)
 
-    def fft_pc_approx(
+    def ap_fapc_approx(
         self,
         pc: np.ndarray,
-        fft_coef: np.ndarray,
+        ap_fapc_coef: np.ndarray,
     ) -> float:
-        coef_app = fft_coef
-        approx = np.fft.irfft(coef_app, n=pc.shape[0])
+        approx = np.fft.irfft(ap_fapc_coef, n=pc.shape[0])
+        return approx
+
+    def calculate_sp_fapc_residual(
+        self,
+        x: np.ndarray,
+        L: np.ndarray,
+        pc: np.ndarray,
+        sp_fapc_coef: np.ndarray,
+    ) -> float:
+        n_coef = 15
+        coef_app = sp_fapc_coef[:n_coef]
+        approx = self.sp_fapc_approx(x, L, pc, coef_app)
+        return self.res(approx, pc)
+
+    def sp_fapc_approx(
+        self,
+        x: np.ndarray,
+        L: np.ndarray,
+        pc: np.ndarray,
+        sp_fapc_coef: np.ndarray,
+    ) -> float:
+        approx = np.zeros(pc.shape)
+        for n, beta_n in enumerate(sp_fapc_coef):
+            if n == 0:
+                approx += np.real(beta_n) / 2
+            else:
+                approx += np.real(beta_n) * np.cos(2 * np.pi * n * x / L) + np.imag(
+                    beta_n
+                ) * np.sin(2 * np.pi * n * x / L)
         return approx
 
     def calculate_hepc_residual(
@@ -160,8 +237,7 @@ class ResidualCalculator(dataset.AirflowSignalProcessor):
         return r.sum()
 
 
-def display() -> None:
-    result_save_dir = "./residuals/"
+def display(residual_save_dir: str) -> None:
     approx_types = get_approx_types()
     res_result_dict = {
         "rips_airflow": [
@@ -171,7 +247,11 @@ def display() -> None:
         "sub_airflow": [{x: [] for x in approx_types}],
         "sub_irr": [{x: [] for x in approx_types}],
     }
-    for fname in tqdm(os.listdir(result_save_dir)):
+
+    subject_fnames = os.listdir(result_save_dir)
+    subject_fnames = get_unique_res_subjects(subject_fnames)
+
+    for fname in tqdm(subject_fnames):
         fpath = os.path.join(result_save_dir, fname)
 
         with open(fpath, "rb") as f:
@@ -185,28 +265,29 @@ def display() -> None:
             for atype in approx_types:
                 res_list = res_result_dict[k][h_idx][atype]
                 res_list_avg = np.mean(res_list)
-                print(f"{k} {h_idx} {atype}: {res_list_avg}")
+                print(f"{k} {h_idx} {atype}: {res_list_avg:.3f}")
 
 
-def process_idx(idx):
-    data_dir = "/work/thesathlab/nchsdb/"
-
+def process_idx(
+    idx: int,
+    preproc_dir: str,
+    data_dir: str,
+    residual_save_dir: str,
+):
     pt_ids = []
     for pt_file in os.listdir(os.path.join(data_dir, "sleep_data")):
         if pt_file.endswith(".edf"):
             pt_ids.append(pt_file.replace(".edf", ""))
 
     pt_id = pt_ids[idx]
-    save_dir = "/work/thesathlab/manjunath.sh/tda_sleep_staging_ptaf/"
 
-    result_save_dir = "./residuals/"
-    if not os.path.exists(result_save_dir):
-        os.makedirs(result_save_dir)
+    if not os.path.exists(residual_save_dir):
+        os.makedirs(residual_save_dir)
 
     loader = ResidualCalculator(
         pt_id=pt_id,
         data_dir=data_dir,
-        save_dir=save_dir,
+        save_dir=preproc_dir,
     )
     subject_ahi = loader.get_ahi()
     subject_age = loader.get_age()
@@ -214,7 +295,7 @@ def process_idx(idx):
     if (subject_ahi < 1) and (subject_age >= 2) and (subject_age < 18):
         result_dict = loader.calculate_residual()
 
-        save_fname_pkl = os.path.join(result_save_dir, f"{pt_id}_res.pkl")
+        save_fname_pkl = os.path.join(residual_save_dir, f"{pt_id}_res.pkl")
         with open(os.path.join(save_fname_pkl), "wb") as f:
             pickle.dump(result_dict, f, protocol=pickle.HIGHEST_PROTOCOL)
     else:
@@ -228,16 +309,18 @@ def process_idx(idx):
             print("Subject age too high!")
 
 
-def get_dmax():
-    data_dir = "/work/thesathlab/nchsdb/"
-    save_dir = "/work/thesathlab/manjunath.sh/tda_sleep_staging_ptaf/"
-
+def get_domain_stats(data_dir: str, preproc_dir: str):
     pt_ids = []
     for pt_file in os.listdir(os.path.join(data_dir, "sleep_data")):
         if pt_file.endswith(".edf"):
             pt_ids.append(pt_file.replace(".edf", ""))
 
-    all_results = {
+    dmax_results = {
+        "rips_airflow": [[], []],
+        "sub_airflow": [[]],
+        "sub_irr": [[]],
+    }
+    dmin_results = {
         "rips_airflow": [[], []],
         "sub_airflow": [[]],
         "sub_irr": [[]],
@@ -247,36 +330,47 @@ def get_dmax():
         loader = ResidualCalculator(
             pt_id=pt_id,
             data_dir=data_dir,
-            save_dir=save_dir,
+            save_dir=preproc_dir,
         )
         subject_ahi = loader.get_ahi()
         subject_age = loader.get_age()
 
         if (subject_ahi < 1) and (subject_age >= 2) and (subject_age < 18):
-            result_dict = loader.get_dmax()
+            retval = loader.get_domain_stats()
+            if retval is not None:
+                dmin_result_dict, dmax_result_dict = retval
+            else:
+                continue
 
-            if result_dict is not None:
-                for k, v in result_dict.items():
+            if dmax_result_dict is not None:
+                for k, v in dmax_result_dict.items():
                     for h_idx, h_dmax_list in enumerate(v):
-                        all_results[k][h_idx] += h_dmax_list
+                        dmax_results[k][h_idx] += h_dmax_list
+            if dmin_result_dict is not None:
+                for k, v in dmin_result_dict.items():
+                    for h_idx, h_dmin_list in enumerate(v):
+                        dmin_results[k][h_idx] += h_dmin_list
 
-    for k, v in all_results.items():
+    for k, v in dmax_results.items():
         for h_idx, h_dmax_list in enumerate(v):
             mval = np.mean(h_dmax_list)
             medval = np.median(h_dmax_list)
             xval = np.max(h_dmax_list)
-            print(f"{k} H_{h_idx}: {mval} mean, {medval} median, {xval} max")
+            print(f"dmax {k} H_{h_idx}: {mval} mean, {medval} median, {xval} max")
 
-
-def get_approx_types():
-    return ["hepc", "fft"]
+    for k, v in dmin_results.items():
+        for h_idx, h_dmin_list in enumerate(v):
+            mval = np.mean(h_dmin_list)
+            medval = np.median(h_dmin_list)
+            xval = np.min(h_dmin_list)
+            print(f"dmin {k} H_{h_idx}: {mval} mean, {medval} median, {xval} min")
 
 
 if __name__ == "__main__":
     Fire(
         {
             "process": process_idx,
-            "dmax": get_dmax,
+            "get_domain_stats": get_domain_stats,
             "display": display,
         }
     )

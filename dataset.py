@@ -21,6 +21,21 @@ import tda_utils
 import utils
 
 
+fapc_support = {
+    "rips_airflow_h0": [0, 0.0002],
+    "rips_airflow_h1": [0, 0.0005],
+    "sublevel_airflow_h0": [-0.0015, 0.0015],
+    "sublevel_irr_h0": [10, 50],
+}
+
+hepc_scale = {
+    "rips_airflow_h0": 90442.544,
+    "rips_airflow_h1": 55034.829,
+    "sublevel_airflow_h0": 15909.436,
+    "sublevel_irr_h0": 0.164,
+}
+
+
 class EpochItem:
     def __init__(
         self,
@@ -311,28 +326,66 @@ class AirflowSignalProcessor:
                 continue
 
             ps_irr = self.persistence_summary(sublevel_dgms_irr[0])
-            hepc_irr = self.hepc(sublevel_dgms_irr[0])
+            hepc_irr = self.hepc(
+                sublevel_dgms_irr[0],
+                scale=hepc_scale["sublevel_irr_h0"],
+            )
             fft_irr = self.fft_pc(sublevel_dgms_irr[0])
-            fft_cf_irr = self.fft_closed_form(sublevel_dgms_irr[0])
+            L_sublevel_irr = (
+                fapc_support["sublevel_irr_h0"][1] - fapc_support["sublevel_irr_h0"][0]
+            )
+            fft_cf_irr = self.fapc_closed_form(
+                sublevel_dgms_irr[0],
+                L=L_sublevel_irr,
+            )
 
             # Applying time-delay embedding and Rips filtration to airflow
             # signal
             rips_dgms_airflow = self.rips_filtration(data_arr, sfreq)
-            hepc_rips_airflow_0 = self.hepc(rips_dgms_airflow[0])
-            hepc_rips_airflow_1 = self.hepc(rips_dgms_airflow[1])
+
+            hepc_rips_airflow_0 = self.hepc(
+                rips_dgms_airflow[0],
+                scale=hepc_scale["rips_airflow_h0"],
+            )
+            hepc_rips_airflow_1 = self.hepc(
+                rips_dgms_airflow[1],
+                scale=hepc_scale["rips_airflow_h1"],
+            )
             ps_rips_airflow_0 = self.persistence_summary(rips_dgms_airflow[0])
             ps_rips_airflow_1 = self.persistence_summary(rips_dgms_airflow[1])
             fft_rips_airflow_0 = self.fft_pc(rips_dgms_airflow[0])
             fft_rips_airflow_1 = self.fft_pc(rips_dgms_airflow[1])
-            fft_cf_rips_airflow_0 = self.fft_closed_form(rips_dgms_airflow[0])
-            fft_cf_rips_airflow_1 = self.fft_closed_form(rips_dgms_airflow[1])
+            L_rips_airflow_h0 = (
+                fapc_support["rips_airflow_h0"][1] - fapc_support["rips_airflow_h0"][0]
+            )
+            fft_cf_rips_airflow_0 = self.fapc_closed_form(
+                rips_dgms_airflow[0],
+                L=L_rips_airflow_h0,
+            )
+            L_rips_airflow_h1 = (
+                fapc_support["rips_airflow_h1"][1] - fapc_support["rips_airflow_h1"][0]
+            )
+            fft_cf_rips_airflow_1 = self.fapc_closed_form(
+                rips_dgms_airflow[1],
+                L=L_rips_airflow_h1,
+            )
 
             # Sublevel set filtration of airflow signal
             sublevel_dgms_airflow = self.sublevel_set_filtration(data_arr)
-            hepc_sub_airflow_0 = self.hepc(sublevel_dgms_airflow[0])
+            hepc_sub_airflow_0 = self.hepc(
+                sublevel_dgms_airflow[0],
+                scale=hepc_scale["sublevel_airflow_h0"],
+            )
             ps_sub_airflow_0 = self.persistence_summary(sublevel_dgms_airflow[0])
             fft_sub_airflow_0 = self.fft_pc(sublevel_dgms_airflow[0])
-            fft_cf_sub_airflow_0 = self.fft_closed_form(sublevel_dgms_airflow[0])
+            L_sublevel_airflow_h0 = (
+                fapc_support["sublevel_airflow_h0"][1]
+                - fapc_support["sublevel_airflow_h0"][0]
+            )
+            fft_cf_sub_airflow_0 = self.fapc_closed_form(
+                sublevel_dgms_airflow[0],
+                L=L_sublevel_airflow_h0,
+            )
 
             # Calculating Non-TDA Features
             # 1 Epoch Features
@@ -348,9 +401,9 @@ class AirflowSignalProcessor:
             #  feat_set_2 = self.classic_features_dtw(epoch_5, epoch_dtw_template, sfreq)
 
             # 25 Epoch Features
-            epoch_25 = airflow_cache.get_centered_epoch_sequence(idx, n_epochs=25)
-            resp_vol_25_epoch_cent = self.classic_features_resp_vol(epoch_25, sfreq)
-            power_25_epoch_cent = self.classic_features_power(epoch_25, sfreq)
+            #  epoch_25 = airflow_cache.get_centered_epoch_sequence(idx, n_epochs=25)
+            #  resp_vol_25_epoch_cent = self.classic_features_resp_vol(epoch_25, sfreq)
+            #  power_25_epoch_cent = self.classic_features_power(epoch_25, sfreq)
 
             # 6 Epoch features to match NTDA
             epoch_6 = data_arr
@@ -383,8 +436,8 @@ class AirflowSignalProcessor:
                     "fft_cf_irr": fft_cf_irr,
                     # Classic Features
                     "breath_cycle_1_epoch": breath_cycle_1_epoch,
-                    "resp_vol_25_epoch_cent": resp_vol_25_epoch_cent,
-                    "power_25_epoch_cent": power_25_epoch_cent,
+                    #  "resp_vol_25_epoch_cent": resp_vol_25_epoch_cent,
+                    #  "power_25_epoch_cent": power_25_epoch_cent,
                     "breath_cycle_6_epoch": breath_cycle_6_epoch,
                     "resp_vol_6_epoch": resp_vol_6_epoch,
                     "power_6_epoch": power_6_epoch,
@@ -524,7 +577,7 @@ class AirflowSignalProcessor:
     ) -> typing.Tuple[np.ndarray, np.ndarray]:
         dgm_clean = dgm[~np.isinf(dgm).any(1)]
         psi_dgms = tda_utils.psi(dgm_clean)
-        x = np.linspace(0, dgm_clean.max(), 1000)
+        x = np.linspace(dgm_clean.min(), dgm_clean.max(), 1000)
         y = np.zeros(x.shape)
 
         for idx, (b, d) in enumerate(dgm_clean):
@@ -532,12 +585,17 @@ class AirflowSignalProcessor:
             y[arr_idx] += psi_dgms[idx]
         return x, y
 
-    def hepc(self, dgm: np.ndarray) -> np.ndarray:
+    def hepc(
+        self,
+        dgm: np.ndarray,
+        scale: typing.Union[float, None] = None,
+    ) -> np.ndarray:
         dgm_clean = dgm[~np.isinf(dgm).any(1)]
 
-        # Scaling centered to 0 and on range with max [-5, 5]
-        dgm_clean_t = dgm_clean * (5 / np.abs(dgm_clean).max())
-        hepc_feat = tda_utils.hepc(dgm_clean_t)
+        if scale:
+            dgm_clean = dgm_clean * scale
+
+        hepc_feat = tda_utils.hepc(dgm_clean)
         return hepc_feat
 
     def fft_pc(self, dgm: np.ndarray) -> np.ndarray:
@@ -545,9 +603,13 @@ class AirflowSignalProcessor:
         fft_feat = tda_utils.fft_pc(dgm_clean)
         return fft_feat
 
-    def fft_closed_form(self, dgm: np.ndarray) -> np.ndarray:
+    def fapc_closed_form(
+        self,
+        dgm: np.ndarray,
+        L: typing.Union[float, None] = None,
+    ) -> np.ndarray:
         dgm_clean = dgm[~np.isinf(dgm).any(1)]
-        fft_feat = tda_utils.fft_closed_form(dgm_clean)
+        fft_feat = tda_utils.fft_closed_form(dgm_clean, L)
         return fft_feat
 
     def classic_features_breath_cycle(
@@ -811,18 +873,14 @@ class AirflowSignalProcessor:
         raise NotImplementedError()
 
 
-def process_idx(idx):
-    data_dir = "/work/thesathlab/nchsdb/"
-
+def process_idx(idx: int, data_dir: str, save_dir: str):
     pt_ids = []
     for pt_file in os.listdir(os.path.join(data_dir, "sleep_data")):
         if pt_file.endswith(".edf"):
             pt_ids.append(pt_file.replace(".edf", ""))
 
     pt_id = pt_ids[idx]
-    #  pt_id = "7612_21985"
 
-    save_dir = "/work/thesathlab/manjunath.sh/tda_sleep_staging_features/"
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
 

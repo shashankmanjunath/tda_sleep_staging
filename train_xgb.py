@@ -1,5 +1,3 @@
-from collections import defaultdict
-import typing
 import os
 
 from xgboost import XGBClassifier
@@ -10,37 +8,25 @@ import sklearn.model_selection
 import sklearn.linear_model
 import numpy as np
 import sklearn
-import skopt
 import wandb
 
-import tda_utils
 import utils
 
 
-def get_unique_subjects(fnames: typing.List) -> typing.List:
-    studies_dict = defaultdict(list)
+def train(
+    preproc_dir: str,
+    data_dir: str,
+    feature_name: str,
+    calc_demos: bool = False,
+    use_wandb: bool = False,
+):
+    subject_fnames = [x for x in os.listdir(preproc_dir) if x.endswith(".hdf5")]
+    subject_fnames = utils.get_unique_subjects(subject_fnames)
 
-    for fname in fnames:
-        pt_id, study_id = fname.split("_")
-        studies_dict[pt_id].append(study_id)
-
-    unique_fnames = []
-    for k, v in studies_dict.items():
-        # Always choose first study_id in list
-        chosen_study_id = v[0]
-        unique_fnames.append(f"{k}_{chosen_study_id}")
-    return unique_fnames
-
-
-def train(data_dir: str, feature_name: str, use_wandb: bool = False):
-    subject_fnames = [x for x in os.listdir(data_dir) if x.endswith(".hdf5")]
-    subject_fnames = get_unique_subjects(subject_fnames)
-    #  subject_fnames = subject_fnames[:50]
-
-    all_paths = np.asarray([os.path.join(data_dir, x) for x in subject_fnames])
+    all_paths = np.asarray([os.path.join(preproc_dir, x) for x in subject_fnames])
     all_demos = utils.get_demographics(
         all_paths,
-        data_dir="/work/thesathlab/nchsdb/",
+        data_dir,
     )
     all_data, all_label = utils.load_data(all_paths, feature_name, sqi_thresh=0.25)
 
@@ -62,10 +48,7 @@ def train(data_dir: str, feature_name: str, use_wandb: bool = False):
         objective="multi:softprob",
         eval_metric="mlogloss",
         seed=xgb_seed,
-        #  use_label_encoder=False,
     )
-
-    #  model = sklearn.linear_model.RidgeClassifier(random_state=999)
 
     n_splits = 5
 
@@ -75,13 +58,6 @@ def train(data_dir: str, feature_name: str, use_wandb: bool = False):
         shuffle=True,
     )
 
-    #  print("Using standard kfold!")
-    #  kf = sklearn.model_selection.KFold(
-    #      n_splits=n_splits,
-    #      random_state=kf_seed,
-    #      shuffle=True,
-    #  )
-
     # wandb setup
     if use_wandb:
         wandb.init(
@@ -90,7 +66,7 @@ def train(data_dir: str, feature_name: str, use_wandb: bool = False):
                 "xgb_params": model.get_xgb_params(),
                 "n_splits": n_splits,
                 "subject_fnames": subject_fnames,
-                "data_dir": data_dir,
+                "data_dir": preproc_dir,
                 "feature_name": feature_name,
                 "xgb_seed": xgb_seed,
                 "kf_seed": kf_seed,
@@ -104,6 +80,12 @@ def train(data_dir: str, feature_name: str, use_wandb: bool = False):
     train_cmat_arr = []
     test_cmat_arr = []
     cohen_kappa = []
+    train_demo_results = {
+        f"{age}_{sex}": [] for age in range(2, 18) for sex in ["M", "F"]
+    }
+    test_demo_results = {
+        f"{age}_{sex}": [] for age in range(2, 18) for sex in ["M", "F"]
+    }
 
     strat_label = [all_demos[x] for x in all_paths]
     pbar = tqdm(kf.split(all_paths, strat_label), total=n_splits)
@@ -111,28 +93,24 @@ def train(data_dir: str, feature_name: str, use_wandb: bool = False):
         train_fnames = all_paths[train_idx]
         test_fnames = all_paths[test_idx]
 
-        if feature_name == "persistence_landscape":
-            train_data, test_data = tda_utils.convert_pd_pl_train_test(
-                all_data,
-                train_fnames,
-                test_fnames,
-            )
-        elif feature_name == "template_function":
-            train_data, test_data = tda_utils.apply_template_function(
-                all_data,
-                train_fnames,
-                test_fnames,
-            )
-        else:
-            train_data = np.concatenate(
-                [all_data[pt_fname] for pt_fname in train_fnames],
-                axis=0,
-            )
+        train_item_strat_label = []
+        test_item_strat_label = []
 
-            test_data = np.concatenate(
-                [all_data[pt_fname] for pt_fname in test_fnames],
-                axis=0,
-            )
+        train_data = np.concatenate(
+            [all_data[pt_fname] for pt_fname in train_fnames],
+            axis=0,
+        )
+        train_item_strat_label = np.concatenate(
+            [[strat_label[idx]] * len(all_data[all_paths[idx]]) for idx in train_idx]
+        )
+        test_item_strat_label = np.concatenate(
+            [[strat_label[idx]] * len(all_data[all_paths[idx]]) for idx in test_idx]
+        )
+
+        test_data = np.concatenate(
+            [all_data[pt_fname] for pt_fname in test_fnames],
+            axis=0,
+        )
 
         train_label = np.concatenate(
             [all_label[pt_fname] for pt_fname in train_fnames],
@@ -142,10 +120,6 @@ def train(data_dir: str, feature_name: str, use_wandb: bool = False):
             [all_label[pt_fname] for pt_fname in test_fnames],
             axis=0,
         )
-
-        # Removing outliers
-        #  train_data = utils.remove_outliers(train_data)
-        #  test_data = utils.remove_outliers(test_data)
 
         # Z-normalization
         scaler = sklearn.preprocessing.StandardScaler()
@@ -163,6 +137,30 @@ def train(data_dir: str, feature_name: str, use_wandb: bool = False):
 
         train_pred = model.predict(train_data)
         test_pred = model.predict(test_data)
+
+        if calc_demos:
+            for k in train_demo_results.keys():
+                train_demo_data = train_data[train_item_strat_label == k]
+                test_demo_data = test_data[test_item_strat_label == k]
+
+                train_demo_label = train_label[train_item_strat_label == k]
+                test_demo_label = test_label[test_item_strat_label == k]
+
+                train_demo_pred = model.predict(train_demo_data)
+                test_demo_pred = model.predict(test_demo_data)
+
+                train_demo_results[k].append(
+                    sklearn.metrics.balanced_accuracy_score(
+                        train_demo_label,
+                        train_demo_pred,
+                    )
+                )
+                test_demo_results[k].append(
+                    sklearn.metrics.balanced_accuracy_score(
+                        test_demo_label,
+                        test_demo_pred,
+                    )
+                )
 
         train_ba = sklearn.metrics.balanced_accuracy_score(train_label, train_pred)
         test_ba = sklearn.metrics.balanced_accuracy_score(test_label, test_pred)
@@ -184,21 +182,17 @@ def train(data_dir: str, feature_name: str, use_wandb: bool = False):
         test_acc_arr.append(test_acc)
         cohen_kappa.append(cohen_kappa_score)
 
-        feature_importance = model.get_booster().get_score(importance_type="gain")
-
         if use_wandb:
-            wandb.log(
-                {
-                    f"train_ba": train_ba,
-                    f"test_ba": test_ba,
-                    f"train_acc": train_acc,
-                    f"test_acc": test_acc,
-                    f"train_cmat": train_cmat,
-                    f"test_cmat": test_cmat,
-                    f"feature_importance": feature_importance,
-                    f"cohen_kappa": cohen_kappa_score,
-                }
-            )
+            wandb_dict = {
+                f"train_ba": train_ba,
+                f"test_ba": test_ba,
+                f"train_acc": train_acc,
+                f"test_acc": test_acc,
+                f"train_cmat": train_cmat,
+                f"test_cmat": test_cmat,
+                f"cohen_kappa": cohen_kappa_score,
+            }
+            wandb.log(wandb_dict)
 
     print(f"{n_splits}-fold validation:")
     print_result("Train Balanced Accuracy", train_ba_arr)
@@ -207,6 +201,8 @@ def train(data_dir: str, feature_name: str, use_wandb: bool = False):
     print_result("Test Accuracy", test_acc_arr)
     print_result("Cohen's Kappa", cohen_kappa)
 
+    print()
+    print(test_ba_arr)
     print()
 
     avg_train_cmat = np.stack(train_cmat_arr).mean(0)
@@ -224,6 +220,15 @@ def train(data_dir: str, feature_name: str, use_wandb: bool = False):
     print()
     print(test_class_acc)
 
+    if calc_demos:
+        for k, v in train_demo_results.items():
+            print(
+                f"{k} Demo Result: Train {np.mean(v):.3f}, Test {np.mean(test_demo_results[k]):.3f}"
+            )
+
+    if use_wandb:
+        wandb.finish()
+
 
 def print_result(key, arr):
     print(f"{key}: {np.mean(arr):.3f} ({np.std(arr):.3f})")
@@ -231,4 +236,3 @@ def print_result(key, arr):
 
 if __name__ == "__main__":
     Fire(train)
-    #  Fire(xgb_param_search)
