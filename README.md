@@ -24,7 +24,8 @@ conda activate tda_sleep_staging
 ```
 
 Once you have the conda environment activated, we require manual installation of
-a single github package. Run:
+a single third-party python package. This is specifically to calculate Hermite
+functions Run:
 
 ```
 git clone https://github.com/rob217/hermite-functions.git
