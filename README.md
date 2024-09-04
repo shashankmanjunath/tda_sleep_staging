@@ -74,7 +74,8 @@ the requisite criteria can take hour or longer to process.
 
 This repository uses weights and biases to record information from runs; we
 recommend setting up and logging into a weights and biases account at [this
-link](https://wandb.ai/site).
+link](https://wandb.ai/site), then connecting your local installation to record
+model statistics to your account.
 
 ### Model Performance Metrics
 
@@ -94,10 +95,28 @@ located. If you wish to run only a single experiment, run the script
 python train_xgb.py --preproc_dir {PREPROC_DIR} --data_dir {DATASET_DIR} --feature_name {FEATURE_NAME} --calc_demos --use_wandb
 ```
 
-The feature name should be one of the allowed feature names: TODO Table.
+The feature name should be one of the allowed feature names in the following
+table.
+
+|          Feature Key           | Corresponding Feature in Results Table |
+| :----------------------------: | :------------------------------------: |
+|            `random`            |            Random Features             |
+|       `classic_6_epoch`        |           Baseline Features            |
+|             `hepc`             |                  HEPC                  |
+|           `ap_fapc`            |                AP-FAPC                 |
+|           `sp_fapc`            |                SP-FAPC                 |
+|         `ap_fapc_hepc`         |             AP-FAPC + HEPC             |
+|         `sp_fapc_hepc`         |             SP-FAPC + HEPC             |
+|     `classic_6_epoch_hepc`     |            Baseline + HEPC             |
+|   `classic_6_epoch_ap_fapc`    |           Baseline + AP-FAPC           |
+|   `classic_6_epoch_sp_fapc`    |           Baseline + SP-FAPC           |
+| `classic_6_epoch_ap_fapc_hepc` |       Baseline + AP-FAPC + HEPC        |
+| `classic_6_epoch_sp_fapc_hepc` |       Baseline + SP-FAPC + HEPC        |
+
 `--calc_demos` is a flag which can be omitted. If included, test accuracies on
 individual age/sex demographics will be calculated and printed. `--use_wandb`
-indicates whether to save statistics about the run to weights and biases.
+is a flag which indicates whether to save statistics about the run to weights
+and biases.
 
 ### Residual Values
 
@@ -146,8 +165,6 @@ located. This function will print out $d_{\text{max}}$ and $d_{\text{min}}$
 statistics once loading is completed.
 
 ## Images in Paper
-
-TODO - Instructions for generating images from jupyter notebook
 
 Generating the images included in the paper requires using a Jupyter notebook.
 First, run the following command:
