@@ -40,8 +40,6 @@ python setup.py install
 
 Once this is complete the environment should be ready for use.
 
-TODO: Test env file
-
 ## Dataset and Preprocessing
 
 This research uses the Nationwide Children's Hospital Sleep DataBank (NCHSDB).

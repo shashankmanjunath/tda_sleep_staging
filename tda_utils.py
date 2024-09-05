@@ -47,21 +47,11 @@ def kurt_pers(pers_arr: np.ndarray) -> float:
 def entr_pers_lifespan(dgms: np.ndarray) -> float:
     """Calculates entropy of persistence"""
     pers_arr = dgms[:, 1] - dgms[:, 0]
-    #  L = np.sum(pers_arr)
-    #  return -np.sum((pers_arr / L) * np.log(pers_arr / L))
     return scipy.stats.entropy(pers_arr)
 
 
 def entr_pers_midlife(dgms: np.ndarray) -> float:
     """Calculates entropy of persistence"""
-    #  pers_arr_p = dgms[:, 1] + dgms[:, 0]
-    #  pers_arr_n = dgms[:, 1] - dgms[:, 0]
-
-    # Correcting for small errors in calculation
-    #  pers_arr_p[pers_arr_p < 0] = 0.0
-
-    #  M = np.sum(pers_arr_p)
-    #  return -np.sum((pers_arr_p / M) * np.log(pers_arr_n / M))
     M = (dgms[:, 1] - dgms[:, 0]) / 2
     return scipy.stats.entropy(np.abs(M))
 
@@ -118,7 +108,7 @@ def hepc(dgms: np.ndarray, n_coef=15) -> np.ndarray:
     return alphas
 
 
-def fft_pc(dgms: np.ndarray) -> np.ndarray:
+def fapc_fft_pc(dgms: np.ndarray) -> np.ndarray:
     psi_dgm = psi(dgms)
     x = np.linspace(dgms.min(), dgms.max(), 1000)
     y = np.zeros(x.shape)
@@ -130,7 +120,7 @@ def fft_pc(dgms: np.ndarray) -> np.ndarray:
     return alpha
 
 
-def fft_closed_form(
+def fapc_closed_form(
     dgms: np.ndarray, L: typing.Union[float, None] = None
 ) -> np.ndarray:
     max_coef = 502

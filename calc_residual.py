@@ -18,13 +18,6 @@ def get_approx_types():
     return ["hepc", "sp_fapc", "ap_fapc"]
 
 
-approx_types_name_map = {
-    "hepc": "hepc",
-    "sp_fapc": "fft_cf",
-    "ap_fapc": "fft",
-}
-
-
 def get_unique_res_subjects(fnames: typing.List) -> typing.List:
     studies_dict = defaultdict(list)
 
@@ -76,11 +69,10 @@ class ResidualCalculator(dataset.AirflowSignalProcessor):
                     for h in h_list:
                         dgm = dgm_idx[h]
                         for approx_type in self.approx_types:
-                            approx_name = approx_types_name_map[approx_type]
                             if dgm_name == "sub_irr":
-                                coefs = f[f"{approx_name}_irr"][idx]
+                                coefs = f[f"{approx_type}_irr"][idx]
                             else:
-                                coefs = f[f"{approx_name}_{dgm_name}_{h}"][idx]
+                                coefs = f[f"{approx_type}_{dgm_name}_{h}"][idx]
                             dgm_key = f"{dgm_name}_h{h}".replace("sub", "sublevel")
                             res = self.calculate_res(
                                 dgm,
@@ -89,6 +81,7 @@ class ResidualCalculator(dataset.AirflowSignalProcessor):
                                 dgm_key,
                             )
                             res_result_dict[dgm_name][h][approx_type].append(res)
+                exit(0)
 
         return res_result_dict
 
@@ -103,21 +96,21 @@ class ResidualCalculator(dataset.AirflowSignalProcessor):
             "sub_airflow": [[]],
             "sub_irr": [[]],
         }
+
         if not os.path.exists(self.save_fname_pkl):
             return
 
         with open(self.save_fname_pkl, "rb") as f_pkl:
             dgms_data = pickle.load(f_pkl)
 
-        with h5py.File(self.save_fname_hdf5, "r") as f:
-            for dgm_name, h_list in self.dgms_to_calc.items():
-                dgm_list = dgms_data[self.dgms_name_map[dgm_name]]
-                for dgm_idx in dgm_list:
-                    for h in h_list:
-                        dgm = dgm_idx[h]
-                        dgm_clean = dgm[~np.isinf(dgm).any(1)]
-                        dmax_result_dict[dgm_name][h].append(dgm_clean.max())
-                        dmin_result_dict[dgm_name][h].append(dgm_clean.min())
+        for dgm_name, h_list in self.dgms_to_calc.items():
+            dgm_list = dgms_data[self.dgms_name_map[dgm_name]]
+            for dgm_idx in dgm_list:
+                for h in h_list:
+                    dgm = dgm_idx[h]
+                    dgm_clean = dgm[~np.isinf(dgm).any(1)]
+                    dmax_result_dict[dgm_name][h].append(dgm_clean.max())
+                    dmin_result_dict[dgm_name][h].append(dgm_clean.min())
         return dmin_result_dict, dmax_result_dict
 
     def calculate_persistence_curve(
@@ -148,7 +141,7 @@ class ResidualCalculator(dataset.AirflowSignalProcessor):
     ) -> float:
         if approx_type == "ap_fapc":
             x, pc = self.calculate_persistence_curve(dgm, scale=False)
-            res = self.calculate_ap_fapc_residual(pc, ap_fapc_coef=coefs)
+            res = self.calculate_ap_fapc_residual(x, pc, ap_fapc_coef=coefs)
         elif approx_type == "sp_fapc":
             x, pc = self.calculate_persistence_curve(dgm, scale=False)
             set_domain = dataset.fapc_support[dgm_key]
@@ -160,26 +153,20 @@ class ResidualCalculator(dataset.AirflowSignalProcessor):
             res = self.calculate_hepc_residual(x, pc, hepc_coef=coefs)
         else:
             raise RuntimeError("Approximation type not recognized!")
-        #  print(f"{approx_type} {dgm_key}: {res}")
+        print(f"{approx_type} {dgm_key}: {res}")
         return res
 
     def calculate_ap_fapc_residual(
         self,
+        x: np.ndarray,
         pc: np.ndarray,
         ap_fapc_coef: np.ndarray,
     ) -> float:
         n_coef = 15
         coef_app = ap_fapc_coef[:n_coef]
-        approx = self.ap_fapc_approx(pc, coef_app)
+        L = x.max() - x.min()
+        approx = self.fapc_approx(x, L, pc, coef_app)
         return self.res(approx, pc)
-
-    def ap_fapc_approx(
-        self,
-        pc: np.ndarray,
-        ap_fapc_coef: np.ndarray,
-    ) -> float:
-        approx = np.fft.irfft(ap_fapc_coef, n=pc.shape[0])
-        return approx
 
     def calculate_sp_fapc_residual(
         self,
@@ -190,10 +177,10 @@ class ResidualCalculator(dataset.AirflowSignalProcessor):
     ) -> float:
         n_coef = 15
         coef_app = sp_fapc_coef[:n_coef]
-        approx = self.sp_fapc_approx(x, L, pc, coef_app)
+        approx = self.fapc_approx(x, L, pc, coef_app)
         return self.res(approx, pc)
 
-    def sp_fapc_approx(
+    def fapc_approx(
         self,
         x: np.ndarray,
         L: np.ndarray,
@@ -248,11 +235,11 @@ def display(residual_save_dir: str) -> None:
         "sub_irr": [{x: [] for x in approx_types}],
     }
 
-    subject_fnames = os.listdir(result_save_dir)
+    subject_fnames = os.listdir(residual_save_dir)
     subject_fnames = get_unique_res_subjects(subject_fnames)
 
     for fname in tqdm(subject_fnames):
-        fpath = os.path.join(result_save_dir, fname)
+        fpath = os.path.join(residual_save_dir, fname)
 
         with open(fpath, "rb") as f:
             data = pickle.load(f)
