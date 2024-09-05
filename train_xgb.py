@@ -22,6 +22,7 @@ def train(
 ):
     subject_fnames = [x for x in os.listdir(preproc_dir) if x.endswith(".hdf5")]
     subject_fnames = utils.get_unique_subjects(subject_fnames)
+    #  subject_fnames = subject_fnames[:50]
 
     all_paths = np.asarray([os.path.join(preproc_dir, x) for x in subject_fnames])
     all_demos = utils.get_demographics(

@@ -557,7 +557,7 @@ class AirflowSignalProcessor:
         if scale:
             dgm_clean = dgm_clean * scale
 
-        hepc_feat = tda_utils.hepc(dgm_clean)
+        hepc_feat = tda_utils.hepc(dgm_clean, n_coef=45)
         return hepc_feat
 
     def fapc_fft_pc(self, dgm: np.ndarray) -> np.ndarray:

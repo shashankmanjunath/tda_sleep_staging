@@ -20,7 +20,7 @@ conda env create -f environment.yml
 You can now activate the environment with the following command:
 
 ```
-conda activate tda_sleep_staging
+conda activate tda_sleep_staging_env
 ```
 
 Once you have the conda environment activated, we require manual installation of
@@ -34,7 +34,7 @@ git clone https://github.com/rob217/hermite-functions.git
 Once this has downloaded, run:
 
 ```
-cd Hermite-functions
+cd hermite-functions
 python setup.py install
 ```
 
