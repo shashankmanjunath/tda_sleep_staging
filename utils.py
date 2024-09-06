@@ -62,6 +62,7 @@ def load_data_hdf5(
 ) -> typing.Tuple[dict, dict]:
     """Helper function to load data saved in hdf5 files"""
     n_feat = 15
+    n_feat_ext = 30
     data = {}
     label = {}
 
@@ -75,6 +76,16 @@ def load_data_hdf5(
                         f["hepc_rips_airflow_0"][:, :n_feat],
                         f["hepc_rips_airflow_1"][:, :n_feat],
                         f["hepc_irr"][:, :n_feat],
+                    ],
+                    axis=-1,
+                )
+            if feature_name == "hepc_30":
+                data_arr = np.concatenate(
+                    [
+                        f["hepc_sub_airflow_0"][:, :n_feat_ext],
+                        f["hepc_rips_airflow_0"][:, :n_feat_ext],
+                        f["hepc_rips_airflow_1"][:, :n_feat_ext],
+                        f["hepc_irr"][:, :n_feat_ext],
                     ],
                     axis=-1,
                 )
@@ -92,6 +103,20 @@ def load_data_hdf5(
                     ],
                     axis=-1,
                 )
+            elif feature_name == "ap_fapc_30":
+                data_arr = np.concatenate(
+                    [
+                        np.real(f["ap_fapc_sub_airflow_0"][:, :n_feat_ext]),
+                        np.imag(f["ap_fapc_sub_airflow_0"][:, :n_feat_ext]),
+                        np.real(f["ap_fapc_rips_airflow_0"][:, :n_feat_ext]),
+                        np.imag(f["ap_fapc_rips_airflow_0"][:, :n_feat_ext]),
+                        np.real(f["ap_fapc_rips_airflow_1"][:, :n_feat_ext]),
+                        np.imag(f["ap_fapc_rips_airflow_1"][:, :n_feat_ext]),
+                        np.real(f["ap_fapc_irr"][:, :n_feat_ext]),
+                        np.imag(f["ap_fapc_irr"][:, :n_feat_ext]),
+                    ],
+                    axis=-1,
+                )
             elif feature_name == "sp_fapc":
                 data_arr = np.concatenate(
                     [
@@ -103,6 +128,20 @@ def load_data_hdf5(
                         np.imag(f["sp_fapc_rips_airflow_1"][:, :n_feat]),
                         np.real(f["sp_fapc_irr"][:, :n_feat]),
                         np.imag(f["sp_fapc_irr"][:, :n_feat]),
+                    ],
+                    axis=-1,
+                )
+            elif feature_name == "sp_fapc_30":
+                data_arr = np.concatenate(
+                    [
+                        np.real(f["sp_fapc_sub_airflow_0"][:, :n_feat_ext]),
+                        np.imag(f["sp_fapc_sub_airflow_0"][:, :n_feat_ext]),
+                        np.real(f["sp_fapc_rips_airflow_0"][:, :n_feat_ext]),
+                        np.imag(f["sp_fapc_rips_airflow_0"][:, :n_feat_ext]),
+                        np.real(f["sp_fapc_rips_airflow_1"][:, :n_feat_ext]),
+                        np.imag(f["sp_fapc_rips_airflow_1"][:, :n_feat_ext]),
+                        np.real(f["sp_fapc_irr"][:, :n_feat_ext]),
+                        np.imag(f["sp_fapc_irr"][:, :n_feat_ext]),
                     ],
                     axis=-1,
                 )
@@ -156,7 +195,7 @@ def load_data_hdf5(
                         f["hepc_sub_airflow_0"][:, :n_feat],
                         f["hepc_rips_airflow_0"][:, :n_feat],
                         f["hepc_rips_airflow_1"][:, :n_feat],
-                        f["hepc_irr"][:n, :n_feat],
+                        f["hepc_irr"][:, :n_feat],
                     ],
                     axis=-1,
                 )

@@ -4,18 +4,21 @@ import train_xgb
 
 def main(preproc_dir: str, data_dir: str):
     feature_set_names = [
-        "random",
-        "classic_6_epoch",
-        "hepc",
-        "ap_fapc",
-        "sp_fapc",
-        "ap_fapc_hepc",
-        "sp_fapc_hepc",
-        "classic_6_epoch_hepc",
-        "classic_6_epoch_ap_fapc",
-        "classic_6_epoch_ap_fapc_hepc",
-        "classic_6_epoch_sp_fapc",
-        "classic_6_epoch_sp_fapc_hepc",
+        #  "random",
+        #  "classic_6_epoch",
+        #  "hepc",
+        "hepc_30",
+        #  "ap_fapc",
+        "ap_fapc_30",
+        #  "sp_fapc",
+        "sp_fapc_30",
+        #  "ap_fapc_hepc",
+        #  "sp_fapc_hepc",
+        #  "classic_6_epoch_hepc",
+        #  "classic_6_epoch_ap_fapc",
+        #  "classic_6_epoch_ap_fapc_hepc",
+        #  "classic_6_epoch_sp_fapc",
+        #  "classic_6_epoch_sp_fapc_hepc",
     ]
     n_feature_set = len(feature_set_names)
 
