@@ -82,16 +82,17 @@ To reproduce the model performance metrics included in the paper, run
 the script `train_multi_xgb.py` as follows:
 
 ```
-python train_multi_xgb.py --preproc_dir {SAVE_DIR} --data_dir {DATASET_DIR}
+python train_multi_xgb.py --preproc_dir {SAVE_DIR} --data_dir {DATASET_DIR} --wandb_project_name {WANDB_PROJECT_NAME}
 ```
 
 `{SAVE_DIR}` should be the directory where the preprocessed data is located.
 `{DATASET_DIR}` should be the directory where the original NCHSDB data is
-located. If you wish to run only a single experiment, run the script
+located, and `{WANDB_PROJECT_NAME}` should be the name of the wandb project you
+set up. If you wish to run only a single experiment, run the script
 `train_xgb.py` as follows:
 
 ```
-python train_xgb.py --preproc_dir {PREPROC_DIR} --data_dir {DATASET_DIR} --feature_name {FEATURE_NAME} --calc_demos --use_wandb
+python train_xgb.py --preproc_dir {PREPROC_DIR} --data_dir {DATASET_DIR} --feature_name {FEATURE_NAME} --calc_demos --use_wandb --wandb_project_name {WANDB_PROJECT_NAME}
 ```
 
 The feature name should be one of the allowed feature names in the following
@@ -205,7 +206,6 @@ To get the sample counts from the whole dataset, run the following command:
 
 ```
 python get_demos_sample_counts.py sample_counts --preproc_dir {PREPROC_DIR}
-
 ```
 
 where `{PREPROC_DIR}` is the directory where the preprocessed data is

@@ -2,7 +2,7 @@ from fire import Fire
 import train_xgb
 
 
-def main(preproc_dir: str, data_dir: str):
+def main(preproc_dir: str, data_dir: str, wandb_project_name: str):
     feature_set_names = [
         "random",
         "classic_6_epoch",
@@ -30,6 +30,7 @@ def main(preproc_dir: str, data_dir: str):
             feature_name=feature_name,
             calc_demos=False,
             use_wandb=True,
+            wandb_project_name=wandb_project_name,
         )
 
 
