@@ -1,18 +1,19 @@
 from itertools import combinations
 import typing
 
+from fire import Fire
 import numpy as np
 
 import scipy
 import wandb
 
 
-def ttest_xgb(run_ids: typing.List[str]):
+def ttest_xgb(run_ids: typing.List[str], wandb_api_str: str):
     api = wandb.Api()
 
     runs = []
     for run_id in run_ids:
-        runs.append(api.run(f"shashankmanjunath/tda_airflow_sleep_staging/{run_id}"))
+        runs.append(api.run(f"{wandb_api_str}/{run_id}"))
 
     data = {}
     for run in runs:
@@ -40,31 +41,4 @@ def ttest_xgb(run_ids: typing.List[str]):
 
 
 if __name__ == "__main__":
-    ttest_xgb(
-        [
-            #  random,
-            #  "yzc3pt9o",
-            #  classic_6_epoch,
-            #  "vm8rhc7i",
-            #  hepc,
-            #  "04rgwl67",
-            #  fft,
-            #  "jh36k3qy",
-            #  fft_cf,
-            #  "9wc1fq7q",
-            #  fft_hepc,
-            #  "08ewqjlu",
-            #  fft_cf_hepc,
-            #  "h14hirh4",
-            #  classic_6_epoch_hepc,
-            #  "f0ck7bnl",
-            #  classic_6_epoch_fft,
-            #  "5c3jhkq5",
-            #  classic_6_epoch_fft_hepc,
-            #  "btnbc4c3",
-            #  classic_6_epoch_fft_cf,
-            #  "e1zcs3i5",
-            #  classic_6_epoch_fft_cf_hepc,
-            #  "q3gvisx3",
-        ]
-    )
+    Fire(ttest_xgb)

@@ -19,6 +19,7 @@ def train(
     feature_name: str,
     calc_demos: bool = False,
     use_wandb: bool = False,
+    wandb_project_name: str = "",
 ):
     subject_fnames = [x for x in os.listdir(preproc_dir) if x.endswith(".hdf5")]
     subject_fnames = utils.get_unique_subjects(subject_fnames)
@@ -61,8 +62,11 @@ def train(
 
     # wandb setup
     if use_wandb:
+        if wandb_project_name == "":
+            raise RuntimeError("If using wandb, need to specific wandb_project_name")
+
         wandb.init(
-            project="tda_airflow_sleep_staging",
+            project=wandb_project_name,
             config={
                 "xgb_params": model.get_xgb_params(),
                 "n_splits": n_splits,
