@@ -183,7 +183,7 @@ class AirflowSignalProcessor:
             "sleep stage r",
         ]
 
-        self.reject_kw = [
+        self.apnea_kw = [
             "central apnea",
             "mixed apnea",
             "obstructive apnea",
@@ -251,15 +251,20 @@ class AirflowSignalProcessor:
         sleep_stage_tsv = raw_tsv[
             [x in self.sleep_stage_kw for x in raw_tsv["description"]]
         ]
+        sleep_stage_tsv["label"] = sleep_stage_tsv["description"]
 
-        reject_tsv = raw_tsv[[x in self.reject_kw for x in raw_tsv["description"]]]
+        apnea_tsv = raw_tsv[[x in self.apnea_kw for x in raw_tsv["description"]]]
 
-        for r_idx, (_, _, _, _, r_interval) in reject_tsv.iterrows():
+        for r_idx, (_, _, description, _, r_interval) in apnea_tsv.iterrows():
             overlap_rows = sleep_stage_tsv[
                 sleep_stage_tsv["interval"].apply(lambda x: x.overlaps(r_interval))
             ]
+            i = overlap_rows.index
 
-            sleep_stage_tsv = sleep_stage_tsv.drop(index=overlap_rows.index, axis=0)
+            sleep_stage_tsv.loc[i, "label"] = sleep_stage_tsv.loc[i, "label"].apply(
+                lambda row: ",".join([row, description]),
+            )
+            # sleep_stage_tsv = sleep_stage_tsv.drop(index=overlap_rows.index, axis=0)
         return sleep_stage_tsv
 
     def load_epoch_cache(
@@ -325,6 +330,10 @@ class AirflowSignalProcessor:
             if np.isnan(sublevel_dgms_irr[0]).sum() > 0:
                 continue
 
+            # Skipping if we only have the inf point in the filtration
+            if sublevel_dgms_irr[0][0, -1] == np.inf:
+                continue
+
             hepc_irr = self.hepc(
                 sublevel_dgms_irr[0],
                 scale=hepc_scale["sublevel_irr_h0"],
@@ -385,12 +394,13 @@ class AirflowSignalProcessor:
 
             # Calculating Non-TDA Features
             _, interval_data = airflow_cache[idx]
-            epoch_6 = data_arr
-            breath_cycle_6_epoch = self.classic_features_breath_cycle(epoch_6, sfreq)
+            breath_cycle_6_epoch = self.classic_features_breath_cycle(data_arr, sfreq)
 
             # Grouping features
             data.append(
                 {
+                    # Raw Signal
+                    "airflow": data_arr.squeeze(),
                     # HEPC Features
                     "hepc_sub_airflow_0": hepc_sub_airflow_0,
                     "hepc_rips_airflow_0": hepc_rips_airflow_0,
@@ -851,15 +861,12 @@ def process_idx(idx: int, data_dir: str, save_dir: str):
         data_dir=data_dir,
         save_dir=save_dir,
     )
-    subject_ahi = loader.get_ahi()
+    #  subject_ahi = loader.get_ahi()
     subject_age = loader.get_age()
 
-    if (subject_ahi < 1) and (subject_age >= 2) and (subject_age < 18):
+    if (subject_age >= 2) and (subject_age < 18):
         loader.process()
     else:
-        if subject_ahi >= 1:
-            print("Subject AHI too high!")
-
         if subject_age < 2:
             print("Subject age too low!")
 
