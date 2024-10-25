@@ -52,7 +52,9 @@ def wake_nrem_rem_map(sample: str) -> int:
         return 0
     elif sample == "sleep stage r":
         return 2
-    return 1
+    elif sample in ["sleep stage n1", "sleep stage n2", "sleep stage n3"]:
+        return 1
+    raise RuntimeError()
 
 
 def load_data_hdf5(

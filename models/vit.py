@@ -57,14 +57,14 @@ class Attention(nn.Module):
         super(Attention, self).__init__()
         self.vis = vis
         self.num_attention_heads = config.transformer["num_heads"]
-        self.attention_head_size = int(config.hidden_size / self.num_attention_heads)
+        self.attention_head_size = int(config.hidden_size_1 / self.num_attention_heads)
         self.all_head_size = self.num_attention_heads * self.attention_head_size
 
-        self.query = Linear(config.hidden_size, self.all_head_size)
-        self.key = Linear(config.hidden_size, self.all_head_size)
-        self.value = Linear(config.hidden_size, self.all_head_size)
+        self.query = Linear(config.hidden_size_1, self.all_head_size)
+        self.key = Linear(config.hidden_size_1, self.all_head_size)
+        self.value = Linear(config.hidden_size_1, self.all_head_size)
 
-        self.out = Linear(config.hidden_size, config.hidden_size)
+        self.out = Linear(config.hidden_size_1, config.hidden_size_1)
         self.attn_dropout = Dropout(config.transformer["attention_dropout_rate"])
         self.proj_dropout = Dropout(config.transformer["attention_dropout_rate"])
 
@@ -105,8 +105,8 @@ class Attention(nn.Module):
 class Mlp(nn.Module):
     def __init__(self, config):
         super(Mlp, self).__init__()
-        self.fc1 = Linear(config.hidden_size, config.transformer["mlp_dim"])
-        self.fc2 = Linear(config.transformer["mlp_dim"], config.hidden_size)
+        self.fc1 = Linear(config.hidden_size_1, config.transformer["mlp_dim"])
+        self.fc2 = Linear(config.transformer["mlp_dim"], config.hidden_size_1)
         self.act_fn = ACT2FN["gelu"]
         self.dropout = Dropout(config.transformer["dropout_rate"])
 
@@ -157,14 +157,14 @@ class Embeddings(nn.Module):
 
         self.patch_embeddings = Conv2d(
             in_channels=in_channels,
-            out_channels=config.hidden_size,
+            out_channels=config.hidden_size_1,
             kernel_size=patch_size,
             stride=patch_size,
         )
         self.position_embeddings = nn.Parameter(
-            torch.zeros(1, n_patches + 1, config.hidden_size)
+            torch.zeros(1, n_patches + 1, config.hidden_size_1)
         )
-        self.cls_token = nn.Parameter(torch.zeros(1, 1, config.hidden_size))
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, config.hidden_size_1))
 
         self.dropout = Dropout(config.transformer["dropout_rate"])
 
@@ -187,9 +187,9 @@ class Embeddings(nn.Module):
 class Block(nn.Module):
     def __init__(self, config, vis):
         super(Block, self).__init__()
-        self.hidden_size = config.hidden_size
-        self.attention_norm = LayerNorm(config.hidden_size, eps=1e-6)
-        self.ffn_norm = LayerNorm(config.hidden_size, eps=1e-6)
+        self.hidden_size = config.hidden_size_1
+        self.attention_norm = LayerNorm(config.hidden_size_1, eps=1e-6)
+        self.ffn_norm = LayerNorm(config.hidden_size_1, eps=1e-6)
         self.ffn = Mlp(config)
         self.attn = Attention(config, vis)
 
@@ -211,22 +211,22 @@ class Block(nn.Module):
         with torch.no_grad():
             query_weight = (
                 np2th(weights[pjoin(ROOT, ATTENTION_Q, "kernel")])
-                .view(self.hidden_size, self.hidden_size)
+                .view(self.hidden_size_1, self.hidden_size_1)
                 .t()
             )
             key_weight = (
                 np2th(weights[pjoin(ROOT, ATTENTION_K, "kernel")])
-                .view(self.hidden_size, self.hidden_size)
+                .view(self.hidden_size_1, self.hidden_size_1)
                 .t()
             )
             value_weight = (
                 np2th(weights[pjoin(ROOT, ATTENTION_V, "kernel")])
-                .view(self.hidden_size, self.hidden_size)
+                .view(self.hidden_size_1, self.hidden_size_1)
                 .t()
             )
             out_weight = (
                 np2th(weights[pjoin(ROOT, ATTENTION_OUT, "kernel")])
-                .view(self.hidden_size, self.hidden_size)
+                .view(self.hidden_size_1, self.hidden_size_1)
                 .t()
             )
 
@@ -269,7 +269,7 @@ class Encoder(nn.Module):
         super(Encoder, self).__init__()
         self.vis = vis
         self.layer = nn.ModuleList()
-        self.encoder_norm = LayerNorm(config.hidden_size, eps=1e-6)
+        self.encoder_norm = LayerNorm(config.hidden_size_1, eps=1e-6)
         for _ in range(config.transformer["num_layers"]):
             layer = Block(config, vis)
             self.layer.append(copy.deepcopy(layer))
@@ -287,7 +287,7 @@ class Encoder(nn.Module):
 class Transformer(nn.Module):
     def __init__(self, config, img_size, vis):
         super(Transformer, self).__init__()
-        self.embeddings = Embeddings(config, img_size=img_size)
+        self.embeddings = Embeddings(config, img_size=img_size, in_channels=1)
         self.encoder = Encoder(config, vis)
 
     def forward(self, input_ids):
@@ -311,12 +311,11 @@ class VisionTransformer(nn.Module):
         self.classifier = "token"
 
         self.transformer = Transformer(config, img_size, vis)
-        self.head = nn.Sequential(
-            [
-                Linear(config.hidden_size_1, config.hidden_size_2),
-                Linear(config.hidden_size_2, num_classes),
-            ]
-        )
+        layers = [
+            Linear(config.hidden_size_1, config.hidden_size_2),
+            Linear(config.hidden_size_2, num_classes),
+        ]
+        self.head = nn.Sequential(*layers)
 
     def forward(self, x, labels=None):
         x, attn_weights = self.transformer(x)

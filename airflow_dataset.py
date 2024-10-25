@@ -24,13 +24,23 @@ class AirflowSignalDataset(torch.utils.data.Dataset):
             "mixed apnea",
         }
         self.label_map = utils.wake_nrem_rem_map
+        self.file_handle_cache = {}
 
         for f_idx, fname in enumerate(tqdm(self.fnames)):
-            with h5py.File(fname) as f:
-                if "airflow" not in f.keys() or "label" not in f.keys():
-                    continue
+            f = h5py.File(fname)
 
-                n_airflow = f["airflow"].shape[0]
+            if "airflow" not in f.keys() or "label" not in f.keys():
+                f.close()
+                continue
+
+            n_airflow = f["airflow"].shape[0]
+            n_time = f["airflow"].shape[1]
+
+            if n_time != 46080:
+                f.close()
+                continue
+
+            self.file_handle_cache[fname] = f
 
             t1 = time.time()
             label_df = pd.read_hdf(fname, key="label")
@@ -59,7 +69,7 @@ class AirflowSignalDataset(torch.utils.data.Dataset):
             self.idx_label_cache += label_df.to_dict("records")
             #  print(f"tolist time: {time.time() - t1}")
 
-            if f_idx > 10:
+            if f_idx >= 5:
                 break
 
     def __len__(self) -> int:
@@ -67,8 +77,12 @@ class AirflowSignalDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx: int) -> typing.Tuple[torch.Tensor, int]:
         sample = self.idx_label_cache[idx]
-        with h5py.File(sample["fname"]) as f:
-            data_arr = f["airflow"][sample["airflow_idx"], :]
-        data_arr = torch.as_tensor(data_arr)[None, None, :]
-        label = self.label_map(sample["label"])
+        #  with h5py.File(sample["fname"], libver="latest", swmr=True) as f:
+        #      data_arr = f["airflow"][sample["airflow_idx"], :]
+
+        f = self.file_handle_cache[sample["fname"]]
+
+        data_arr = f["airflow"][sample["airflow_idx"], :]
+        data_arr = torch.as_tensor(data_arr)[None, :, None]
+        label = self.label_map(sample["label"][0])
         return data_arr, label

@@ -1,16 +1,19 @@
+import time
 import os
 
-#  from tqdm import tqdm
+from tqdm import tqdm
 
-#  import torch.nn as nn
-#  import torch
+import torch.nn.functional as F
+import torch.nn as nn
+import torch
 
-#  import sklearn.model_selection
-#  import ml_collections
-#  import numpy as np
+import sklearn.model_selection
+import ml_collections
+import numpy as np
+import wandb
 
-#  from airflow_dataset import AirflowSignalDataset
-#  import models.vit
+from airflow_dataset import AirflowSignalDataset
+import models.vit
 import utils
 
 
@@ -34,7 +37,14 @@ class ModelTrainer:
     def __init__(self, train_dataset, test_dataset, model):
         self.train_dataset = train_dataset
         self.test_dataset = test_dataset
-        self.batch_size = 1024
+        self.batch_size = 128
+        self.epochs = 1000
+        self.num_workers = 16
+        self.model_save_dir = os.path.join("./", "best_models")
+        self.model_save_fname = os.path.join(self.model_save_dir, "best_model.pth")
+
+        if not os.path.exists(self.model_save_dir):
+            os.makedirs(self.model_save_dir)
 
         self.device = torch.device("cpu")
         if torch.cuda.is_available():
@@ -43,29 +53,140 @@ class ModelTrainer:
         self.train_loader = torch.utils.data.DataLoader(
             self.train_dataset,
             self.batch_size,
+            num_workers=self.num_workers,
+            #  prefetch_factor=8,
+            shuffle=True,
             pin_memory=True,
         )
-        self.train_loader = torch.utils.data.DataLoader(
-            self.train_dataset,
+        self.test_loader = torch.utils.data.DataLoader(
+            self.test_dataset,
             self.batch_size,
+            num_workers=self.num_workers,
+            #  prefetch_factor=8,
+            shuffle=True,
             pin_memory=True,
         )
+
+        self.n_test_steps = 250
+        self.best_test_ba = -1.0
 
         self.model = model.to(self.device)
-        self.optim = torch.optim.Adam(self.model.parameters(), lr=1e-4)
+        self.lr = 1e-3
+        t1 = time.time()
+        self.optim = torch.optim.Adam(self.model.parameters(), lr=self.lr)
+        print(f"Optimizer initialization time: {time.time() - t1}")
         self.criterion = nn.CrossEntropyLoss()
 
-    def train(self):
-        for train_data, train_label in self.train_loader:
-            train_data = train_data.to(self.device)
-            train_label = train_label.to(self.device)
+        self.use_wandb = True
+        if self.use_wandb:
+            self.run = wandb.init(
+                project="tda_airflow_sleep_staging",
+                config={
+                    "batch_size": self.batch_size,
+                    "learning_rate": self.lr,
+                    "epochs": self.epochs,
+                },
+            )
 
-            outputs = self.model(train_data)
-            loss = self.criterion(outputs, train_label)
-            loss.backward()
-            self.optim.step()
-            pass
-        pass
+    def train(self):
+        steps = 0
+        for epoch in range(self.epochs):
+            self.model = self.model.train()
+            pbar = tqdm(self.train_loader, desc=f"Training [{epoch+1}/{self.epochs}]")
+            for idx, (train_data, train_label) in enumerate(pbar):
+                if steps % self.n_test_steps == 0 and steps > 0:
+                    test_ba = self.test()
+                    pbar.set_postfix({"test_acc": f"{test_ba:.3f}"})
+
+                    if test_ba > self.best_test_ba:
+                        print("Saving new best model...")
+                        torch.save(self.model.state_dict(), self.model_save_fname)
+
+                        if self.use_wandb:
+                            self.run.link_model(
+                                path=self.model_save_fname,
+                                registered_model_name="best_model",
+                            )
+
+                        self.best_test_ba = test_ba
+
+                train_data = train_data.to(self.device).float()
+                train_label = train_label.to(self.device)
+
+                self.optim.zero_grad()
+
+                logits, attn_weights = self.model(train_data)
+
+                loss = self.criterion(logits, train_label)
+                loss.backward()
+                self.optim.step()
+
+                preds = F.softmax(logits, dim=-1).argmax(-1)
+
+                train_acc = (preds == train_label).sum() / preds.size()[0]
+
+                if self.use_wandb:
+                    self.run.log(
+                        {
+                            "train_loss": loss.item(),
+                            "train_acc": train_acc.item(),
+                        }
+                    )
+
+                steps += 1
+
+    def test(self):
+        with torch.no_grad():
+            self.model = self.model.eval()
+            all_preds = []
+            all_labels = []
+            losses = []
+
+            pbar = tqdm(self.test_loader, desc="Testing...")
+            for idx, (data, labels) in enumerate(pbar):
+                all_labels.append(labels.numpy())
+
+                data = data.to(self.device).float()
+                labels = labels.to(self.device).long()
+
+                logits, attn_weights = self.model(data)
+                loss = self.criterion(logits, labels)
+                losses.append(loss.item() * labels.shape[0])
+
+                preds = F.softmax(logits, dim=-1).argmax(dim=-1)
+
+                all_preds.append(preds.cpu().numpy())
+
+            all_preds = np.concatenate(all_preds).astype(int)
+            all_labels = np.concatenate(all_labels).astype(int)
+            #  test_acc = (all_preds == all_labels).sum() / all_labels.size
+
+            test_ba = sklearn.metrics.balanced_accuracy_score(all_labels, all_preds)
+            test_f1 = sklearn.metrics.f1_score(all_labels, all_preds, average="macro")
+            test_precision = sklearn.metrics.precision_score(
+                all_labels,
+                all_preds,
+                average="macro",
+            )
+            test_recall = sklearn.metrics.recall_score(
+                all_labels,
+                all_preds,
+                average="macro",
+            )
+
+            loss = np.sum(losses) / all_labels.size
+
+            if self.use_wandb:
+                self.run.log(
+                    {
+                        "test_loss": loss,
+                        "test_ba": test_ba,
+                        "test_f1": test_f1,
+                        "test_precision": test_precision,
+                        "test_recall": test_recall,
+                    }
+                )
+        return test_ba
 
 
 def train(
@@ -95,9 +216,14 @@ def train(
     )
     strat_label = [all_demos[x] for x in all_paths]
     config = transformer_config()
-    pbar = tqdm(kf.split(all_paths, strat_label), total=n_splits)
+    selected_split = 0
 
-    for idx, (train_idx, test_idx) in enumerate(pbar):
+    for idx, (train_idx, test_idx) in enumerate(kf.split(all_paths, strat_label)):
+        if idx != selected_split:
+            continue
+
+        print(f"Running Split {idx}")
+
         train_fnames = all_paths[train_idx]
         test_fnames = all_paths[test_idx]
 
@@ -109,11 +235,12 @@ def train(
             img_size=(1, 46080),
             num_classes=3,
         )
+        model_parameters = filter(lambda p: p.requires_grad, model.parameters())
+        params = sum([np.prod(p.size()) for p in model_parameters])
+        print(f"Number of parameters: {params}")
 
         trainer = ModelTrainer(train_dataset, test_dataset, model)
         trainer.train()
-        pass
-    pass
 
 
 if __name__ == "__main__":
