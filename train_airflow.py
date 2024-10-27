@@ -1,6 +1,7 @@
 import time
 import os
 
+from fire import Fire
 from tqdm import tqdm
 
 import torch.nn.functional as F
@@ -34,14 +35,23 @@ def transformer_config():
 
 
 class ModelTrainer:
-    def __init__(self, train_dataset, test_dataset, model):
+    def __init__(
+        self,
+        train_dataset: torch.utils.data.Dataset,
+        test_dataset: torch.utils.data.Dataset,
+        model: nn.Module,
+        split_idx: int,
+    ):
         self.train_dataset = train_dataset
         self.test_dataset = test_dataset
         self.batch_size = 128
         self.epochs = 1000
         self.num_workers = 16
         self.model_save_dir = os.path.join("./", "best_models")
-        self.model_save_fname = os.path.join(self.model_save_dir, "best_model.pth")
+        self.model_save_fname = os.path.join(
+            self.model_save_dir,
+            f"best_model_{split_idx}.pth",
+        )
 
         if not os.path.exists(self.model_save_dir):
             os.makedirs(self.model_save_dir)
@@ -67,15 +77,19 @@ class ModelTrainer:
             pin_memory=True,
         )
 
-        self.n_test_steps = 250
+        self.n_test_steps = 5000
         self.best_test_ba = -1.0
 
         self.model = model.to(self.device)
-        self.lr = 1e-3
+        self.lr = 1e-4
         t1 = time.time()
         self.optim = torch.optim.Adam(self.model.parameters(), lr=self.lr)
         print(f"Optimizer initialization time: {time.time() - t1}")
-        self.criterion = nn.CrossEntropyLoss()
+
+        self.train_weights = torch.as_tensor(self.train_dataset.class_weights)
+        self.criterion = nn.CrossEntropyLoss(
+            weight=self.train_weights.to(self.device).float(),
+        )
 
         self.use_wandb = True
         if self.use_wandb:
@@ -192,9 +206,10 @@ class ModelTrainer:
 def train(
     preproc_dir: str,
     data_dir: str,
-    calc_demos: bool = False,
-    use_wandb: bool = False,
-    wandb_project_name: str = "",
+    target_split: int,
+    #  calc_demos: bool = False,
+    #  use_wandb: bool = False,
+    #  wandb_project_name: str = "",
 ):
     subject_fnames = [x for x in os.listdir(preproc_dir) if x.endswith(".hdf5")]
     subject_fnames = utils.get_unique_subjects(subject_fnames)
@@ -216,13 +231,12 @@ def train(
     )
     strat_label = [all_demos[x] for x in all_paths]
     config = transformer_config()
-    selected_split = 0
 
-    for idx, (train_idx, test_idx) in enumerate(kf.split(all_paths, strat_label)):
-        if idx != selected_split:
+    for split_idx, (train_idx, test_idx) in enumerate(kf.split(all_paths, strat_label)):
+        if split_idx != target_split:
             continue
 
-        print(f"Running Split {idx}")
+        print(f"Running Split {split_idx}")
 
         train_fnames = all_paths[train_idx]
         test_fnames = all_paths[test_idx]
@@ -239,13 +253,20 @@ def train(
         params = sum([np.prod(p.size()) for p in model_parameters])
         print(f"Number of parameters: {params}")
 
-        trainer = ModelTrainer(train_dataset, test_dataset, model)
+        trainer = ModelTrainer(
+            train_dataset,
+            test_dataset,
+            model,
+            split_idx=split_idx,
+        )
         trainer.train()
 
 
 if __name__ == "__main__":
     print("Starting...")
-    train(
-        preproc_dir="/work/thesathlab/manjunath.sh/tda_sleep_staging_airflow",
-        data_dir="/work/thesathlab/nchsdb/",
-    )
+
+    Fire(train)
+    #  train(
+    #      preproc_dir="/work/thesathlab/manjunath.sh/tda_sleep_staging_airflow",
+    #      data_dir="/work/thesathlab/nchsdb/",
+    #  )

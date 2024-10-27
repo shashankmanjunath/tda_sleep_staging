@@ -4,6 +4,7 @@ import time
 from tqdm import tqdm
 
 import torch.utils.data
+import sklearn.utils
 import pandas as pd
 import numpy as np
 import torch
@@ -25,6 +26,8 @@ class AirflowSignalDataset(torch.utils.data.Dataset):
         }
         self.label_map = utils.wake_nrem_rem_map
         self.file_handle_cache = {}
+
+        label_arr = []
 
         for f_idx, fname in enumerate(tqdm(self.fnames)):
             f = h5py.File(fname)
@@ -69,16 +72,22 @@ class AirflowSignalDataset(torch.utils.data.Dataset):
             self.idx_label_cache += label_df.to_dict("records")
             #  print(f"tolist time: {time.time() - t1}")
 
-            if f_idx >= 5:
-                break
+            label_arr += [self.label_map(x["label"][0]) for x in self.idx_label_cache]
+
+            #  if f_idx >= 5:
+            #      break
+
+        self.class_weights = sklearn.utils.class_weight.compute_class_weight(
+            class_weight="balanced",
+            classes=np.unique(label_arr),
+            y=label_arr,
+        )
 
     def __len__(self) -> int:
         return len(self.idx_label_cache)
 
     def __getitem__(self, idx: int) -> typing.Tuple[torch.Tensor, int]:
         sample = self.idx_label_cache[idx]
-        #  with h5py.File(sample["fname"], libver="latest", swmr=True) as f:
-        #      data_arr = f["airflow"][sample["airflow_idx"], :]
 
         f = self.file_handle_cache[sample["fname"]]
 
