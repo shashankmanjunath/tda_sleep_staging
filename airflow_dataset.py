@@ -74,8 +74,8 @@ class AirflowSignalDataset(torch.utils.data.Dataset):
 
             label_arr += [self.label_map(x["label"][0]) for x in self.idx_label_cache]
 
-            #  if f_idx >= 5:
-            #      break
+            if f_idx >= 5:
+                break
 
         self.class_weights = sklearn.utils.class_weight.compute_class_weight(
             class_weight="balanced",

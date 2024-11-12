@@ -1,3 +1,4 @@
+import typing
 import time
 import os
 
@@ -41,16 +42,30 @@ class ModelTrainer:
         test_dataset: torch.utils.data.Dataset,
         model: nn.Module,
         split_idx: int,
+        use_wandb: bool = False,
+        continue_run_path: typing.Optional[str] = None,
     ):
         self.train_dataset = train_dataset
         self.test_dataset = test_dataset
+        self.split_idx = split_idx
+        self.use_wandb = use_wandb
+        self.continue_run_path = continue_run_path
         self.batch_size = 512
-        self.epochs = 1000
-        self.num_workers = 16
-        self.model_save_dir = os.path.join("./", "best_models")
+        self.start_epoch = 0
+        self.epochs = 25
+        self.num_workers = 8
+        self.model_save_dir = os.path.join(
+            "./",
+            "best_models",
+            f"split_{self.split_idx}",
+        )
         self.model_save_fname = os.path.join(
             self.model_save_dir,
-            f"best_model_{split_idx}.pth",
+            f"best_model_{self.split_idx}.pth",
+        )
+
+        self.model_train_checkpoint = os.path.join(
+            self.model_save_dir, f"model_checkpoint_{self.split_idx}.pth"
         )
 
         if not os.path.exists(self.model_save_dir):
@@ -77,7 +92,8 @@ class ModelTrainer:
             pin_memory=True,
         )
 
-        self.n_test_steps = 5000
+        self.n_test_steps = 50
+        #  self.n_test_steps = 5000
         self.best_test_ba = -1.0
 
         self.model = model.to(self.device)
@@ -91,20 +107,38 @@ class ModelTrainer:
             weight=self.train_weights.to(self.device).float(),
         )
 
-        self.use_wandb = True
         if self.use_wandb:
-            self.run = wandb.init(
-                project="tda_airflow_sleep_staging",
-                config={
-                    "batch_size": self.batch_size,
-                    "learning_rate": self.lr,
-                    "epochs": self.epochs,
-                },
-            )
+            if not self.continue_run_path:
+                self.run = wandb.init(
+                    project="tda_airflow_sleep_staging",
+                    name=f"fold_{self.split_idx}",
+                    config={
+                        "batch_size": self.batch_size,
+                        "learning_rate": self.lr,
+                        "epochs": self.epochs,
+                    },
+                )
+            else:
+                data_fname = wandb.restore(
+                    self.model_train_checkpoint,
+                    run_path=self.continue_run_path,
+                )
+                weights_data = torch.load(data_fname.name, weights_only=False)
+                self.model.load_state_dict(weights_data["model_state_dict"])
+                self.optim.load_state_dict(weights_data["optimizer"])
+                self.start_epoch = weights_data["epoch"]
+                self.best_test_ba = weights_data["best_test_acc"]
+
+                run_id = self.continue_run_path.split("/")[-1]
+                self.run = wandb.init(
+                    project="tda_airflow_sleep_staging",
+                    id=run_id,
+                    resume="must",
+                )
 
     def train(self):
         steps = 0
-        for epoch in range(self.epochs):
+        for epoch in range(self.start_epoch, self.epochs):
             self.model = self.model.train()
             pbar = tqdm(self.train_loader, desc=f"Training [{epoch+1}/{self.epochs}]")
             for idx, (train_data, train_label) in enumerate(pbar):
@@ -114,13 +148,18 @@ class ModelTrainer:
 
                     if test_ba > self.best_test_ba:
                         print("Saving new best model...")
-                        torch.save(self.model.state_dict(), self.model_save_fname)
+                        torch.save(
+                            {
+                                "model_state_dict": self.model.state_dict(),
+                                "epoch": epoch,
+                                "optimizer": self.optim.state_dict(),
+                                "best_test_acc": test_ba,
+                            },
+                            self.model_save_fname,
+                        )
 
                         if self.use_wandb:
-                            self.run.link_model(
-                                path=self.model_save_fname,
-                                registered_model_name="best_model",
-                            )
+                            wandb.save(self.model_save_fname)
 
                         self.best_test_ba = test_ba
 
@@ -146,6 +185,19 @@ class ModelTrainer:
                             "train_acc": train_acc.item(),
                         }
                     )
+
+                    torch.save(
+                        {
+                            "model_state_dict": self.model.state_dict(),
+                            "epoch": epoch,
+                            "optimizer": self.optim.state_dict(),
+                            "best_test_acc": self.best_test_ba,
+                        },
+                        self.model_train_checkpoint,
+                    )
+
+                    if self.use_wandb:
+                        wandb.save(self.model_train_checkpoint)
 
                 steps += 1
 
@@ -208,8 +260,8 @@ def train(
     data_dir: str,
     target_split: int,
     #  calc_demos: bool = False,
-    #  use_wandb: bool = False,
-    #  wandb_project_name: str = "",
+    use_wandb: bool = False,
+    continue_run_path: typing.Optional[str] = None,
 ):
     subject_fnames = [x for x in os.listdir(preproc_dir) if x.endswith(".hdf5")]
     subject_fnames = utils.get_unique_subjects(subject_fnames)
@@ -258,11 +310,12 @@ def train(
             test_dataset,
             model,
             split_idx=split_idx,
+            use_wandb=use_wandb,
+            continue_run_path=continue_run_path,
         )
         trainer.train()
 
 
 if __name__ == "__main__":
     print("Starting...")
-
     Fire(train)
