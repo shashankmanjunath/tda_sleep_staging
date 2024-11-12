@@ -1,8 +1,7 @@
 # Sleep Staging from Airflow Signals Using Fourier Approximations of Persistence Curves
 
 This repository accompanies the paper "Sleep Staging from Airflow Signals Using
-Fourier Approximations of Persistence Curves." This repository is anonymized for
-submission purposes.
+Fourier Approximations of Persistence Curves."
 
 ## Environment Setup
 

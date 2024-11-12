@@ -44,7 +44,7 @@ class ModelTrainer:
     ):
         self.train_dataset = train_dataset
         self.test_dataset = test_dataset
-        self.batch_size = 128
+        self.batch_size = 512
         self.epochs = 1000
         self.num_workers = 16
         self.model_save_dir = os.path.join("./", "best_models")
@@ -266,7 +266,3 @@ if __name__ == "__main__":
     print("Starting...")
 
     Fire(train)
-    #  train(
-    #      preproc_dir="/work/thesathlab/manjunath.sh/tda_sleep_staging_airflow",
-    #      data_dir="/work/thesathlab/nchsdb/",
-    #  )
