@@ -52,7 +52,7 @@ class ModelTrainer:
         self.continue_run_path = continue_run_path
         self.batch_size = 512
         self.start_epoch = 0
-        self.epochs = 25
+        self.epochs = 1000
         self.num_workers = 8
         self.model_save_dir = os.path.join(
             "./",
@@ -92,8 +92,7 @@ class ModelTrainer:
             pin_memory=True,
         )
 
-        self.n_test_steps = 50
-        #  self.n_test_steps = 5000
+        self.n_test_steps = 5000
         self.best_test_ba = -1.0
 
         self.model = model.to(self.device)
