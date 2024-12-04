@@ -164,10 +164,30 @@ located and `{PREPROC_DIR}` is the directory where the preprocessed data is
 located. This function will print out $d_{\text{max}}$ and $d_{\text{min}}$
 statistics once loading is completed.
 
-## Images in Paper
+## Images and Tables in Paper
 
-Generating the images included in the paper requires using a Jupyter notebook.
-First, run the following command:
+Generating the images and tables in the paper first requires generating the
+results from the Transformer model trained to predict sleep stage from raw
+airflow signals. To generate the results, run the following command:
+
+```
+python test_airflow.py --preproc_dir {PREPROC_DIR} --data_dir {DATASET_DIR} --wandb_username {WANDB_USERNAME} --wandb_project_name {WANDB_PROJECT_NAME} --fold_run_ids '["{FOLD_0_ID}","{FOLD_1_ID}","{FOLD_2_ID}","{FOLD_3_ID}","{FOLD_4_ID}"]' --save_fname {SAVE_FILE}
+```
+
+where `{PREPROC_DIR}` is the directory where preprocessed data is located,
+`{DATASET_DIR}` is the directory where the original NCHSDB dataset is located,
+`{WANDB_USERNAME}` is the wandb username where you saved results from
+transformer training, `{WANDB_PROJECT_NAME}` is the name of the project where
+you saved results from transformer training, `--fold_run_ids` is the run ids of
+each cross-validation fold (note that order matters for this argument), and
+`{SAVE_FILE}` is the file where you want to save the results of the test. Note
+that the `--fold_run_ids` is highly particular about quotes. Use single quotes
+outside the list, and double quotes within the list, as shown in the example
+command.
+
+Once you have generated the transformer results generating the tables and images
+included in the paper requires using a Jupyter notebook. Run the
+following command:
 
 ```
 jupyter lab
