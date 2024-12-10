@@ -424,11 +424,14 @@ class AirflowSignalProcessor:
                 }
             )
 
-            # Diagrams -- placed in .pkl file since they have inconsistence
+            # Diagrams -- placed in .pkl file since they have inconsistent
             # sizes
             dgms_dict["irr_sublevel"].append(sublevel_dgms_irr)
             dgms_dict["airflow_sublevel"].append(sublevel_dgms_airflow)
             dgms_dict["airflow_rips"].append(rips_dgms_airflow)
+
+            #  if idx > 25:
+            #      break
 
         label_df = pd.concat([x["label"] for x in data], axis=1).T
         label_df = label_df.drop("interval", axis=1)

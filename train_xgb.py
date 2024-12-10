@@ -1,3 +1,4 @@
+import typing
 import os
 
 from xgboost import XGBClassifier
@@ -6,10 +7,12 @@ from tqdm import tqdm
 
 import sklearn.model_selection
 import sklearn.linear_model
+import pandas as pd
 import numpy as np
 import sklearn
 import wandb
 
+import filters
 import utils
 
 
@@ -17,23 +20,43 @@ def train(
     preproc_dir: str,
     data_dir: str,
     feature_name: str,
+    filter_type: typing.Union[str, None] = None,
     calc_demos: bool = False,
     use_wandb: bool = False,
     wandb_project_name: str = "",
 ):
+    if filter_type:
+        filters.check_filter_func(filter_type)
+
     subject_fnames = [x for x in os.listdir(preproc_dir) if x.endswith(".hdf5")]
     subject_fnames = utils.get_unique_subjects(subject_fnames)
+
+    subject_fnames = subject_fnames
 
     all_paths = np.asarray([os.path.join(preproc_dir, x) for x in subject_fnames])
     all_demos = utils.get_demographics(
         all_paths,
         data_dir,
     )
-    all_data, all_label = utils.load_data(all_paths, feature_name, sqi_thresh=0.25)
+    sqi_thresh = 0.5
+    print(f"SQI Threshold: {sqi_thresh}")
+    all_data, all_label = utils.load_data(all_paths, feature_name)
 
     map_type = utils.wake_nrem_rem_map
     for k, v in all_label.items():
-        all_label[k] = np.asarray(list(map(map_type, v)))
+        all_label[k]["sleep_label"] = all_label[k]["description"].map(map_type)
+
+    if filter_type:
+        print(f"{len(all_paths)} Subjects before filtering")
+        all_data, all_label, all_paths = filters.filter_data(
+            all_data,
+            all_label,
+            all_paths,
+            filter_type,
+        )
+        print(f"{len(all_paths)} Subjects after filtering")
+    else:
+        print(f"{len(all_paths)} Subjects")
 
     xgb_seed = 999
     kf_seed = 2024
@@ -97,33 +120,36 @@ def train(
         train_fnames = all_paths[train_idx]
         test_fnames = all_paths[test_idx]
 
-        train_item_strat_label = []
-        test_item_strat_label = []
+        train_data = []
+        train_label_df = []
+        for pt_fname in train_fnames:
+            if (pt_fname in all_data.keys()) and (pt_fname in all_label.keys()):
+                train_data.append(all_data[pt_fname])
+                train_label_df.append(all_label[pt_fname])
 
-        train_data = np.concatenate(
-            [all_data[pt_fname] for pt_fname in train_fnames],
-            axis=0,
+        train_data = np.concatenate(train_data, axis=0)
+        train_label_df = pd.concat(train_label_df, axis=0)
+        train_data, train_label_df = apply_sqi_threshold(
+            train_data,
+            train_label_df,
+            sqi_thresh,
         )
-        train_item_strat_label = np.concatenate(
-            [[strat_label[idx]] * len(all_data[all_paths[idx]]) for idx in train_idx]
-        )
-        test_item_strat_label = np.concatenate(
-            [[strat_label[idx]] * len(all_data[all_paths[idx]]) for idx in test_idx]
-        )
+        train_label = train_label_df["sleep_label"].tolist()
 
-        test_data = np.concatenate(
-            [all_data[pt_fname] for pt_fname in test_fnames],
-            axis=0,
+        test_data = []
+        test_label_df = []
+        for pt_fname in test_fnames:
+            if (pt_fname in all_data.keys()) and (pt_fname in all_label.keys()):
+                test_data.append(all_data[pt_fname])
+                test_label_df.append(all_label[pt_fname])
+        test_data = np.concatenate(test_data, axis=0)
+        test_label_df = pd.concat(test_label_df, axis=0)
+        test_data, test_label_df = apply_sqi_threshold(
+            test_data,
+            test_label_df,
+            sqi_thresh,
         )
-
-        train_label = np.concatenate(
-            [all_label[pt_fname] for pt_fname in train_fnames],
-            axis=0,
-        )
-        test_label = np.concatenate(
-            [all_label[pt_fname] for pt_fname in test_fnames],
-            axis=0,
-        )
+        test_label = test_label_df["sleep_label"].tolist()
 
         # Z-normalization
         scaler = sklearn.preprocessing.StandardScaler()
@@ -143,6 +169,15 @@ def train(
         test_pred = model.predict(test_data)
 
         if calc_demos:
+            train_item_strat_label = np.concatenate(
+                [
+                    [strat_label[idx]] * len(all_data[all_paths[idx]])
+                    for idx in train_idx
+                ]
+            )
+            test_item_strat_label = np.concatenate(
+                [[strat_label[idx]] * len(all_data[all_paths[idx]]) for idx in test_idx]
+            )
             for k in train_demo_results.keys():
                 train_demo_data = train_data[train_item_strat_label == k]
                 test_demo_data = test_data[test_item_strat_label == k]
@@ -236,6 +271,17 @@ def train(
 
 def print_result(key, arr):
     print(f"{key}: {np.mean(arr):.3f} ({np.std(arr):.3f})")
+
+
+def apply_sqi_threshold(
+    data: np.ndarray,
+    label: pd.DataFrame,
+    sqi_thresh: float,
+) -> typing.Tuple[np.ndarray, pd.DataFrame]:
+    loc_arr = label["sqi"] >= sqi_thresh
+    data = data[loc_arr, :]
+    label = label[loc_arr]
+    return data, label
 
 
 if __name__ == "__main__":

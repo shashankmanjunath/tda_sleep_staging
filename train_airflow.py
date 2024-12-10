@@ -289,8 +289,8 @@ def train(
 
         print(f"Running Split {split_idx}")
 
-        train_fnames = all_paths[train_idx]
-        test_fnames = all_paths[test_idx]
+        train_fnames = all_paths[train_idx][:10]
+        test_fnames = all_paths[test_idx][:10]
 
         train_dataset = AirflowSignalDataset(train_fnames)
         test_dataset = AirflowSignalDataset(test_fnames)

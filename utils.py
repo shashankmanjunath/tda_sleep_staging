@@ -16,16 +16,13 @@ def iqr(x):
     return q75 - q25
 
 
-def drop_nan_rows(
+def replace_nan_inf_rows(
     arr: np.ndarray,
-    label: np.ndarray,
 ) -> typing.Tuple[np.ndarray, np.ndarray]:
-    #  clean_arr = arr[~np.isnan(arr).any(axis=1)]
-    #  clean_label = label[~np.isnan(arr).any(axis=1)]
     clean_arr = arr
     clean_arr[np.isnan(clean_arr)] = 0
     clean_arr[np.isinf(clean_arr)] = 0
-    return clean_arr, label
+    return clean_arr
 
 
 ORDINAL_MAP = {
@@ -60,7 +57,6 @@ def wake_nrem_rem_map(sample: str) -> int:
 def load_data_hdf5(
     fnames_list: typing.List[str],
     feature_name: str,
-    sqi_thresh: float,
 ) -> typing.Tuple[dict, dict]:
     """Helper function to load data saved in hdf5 files"""
     n_feat = 15
@@ -70,6 +66,9 @@ def load_data_hdf5(
 
     for fname in tqdm(fnames_list):
         with h5py.File(fname, "r") as f:
+            if len(f.keys()) == 0:
+                continue
+
             # Loading data
             if feature_name == "hepc":
                 data_arr = np.concatenate(
@@ -81,7 +80,7 @@ def load_data_hdf5(
                     ],
                     axis=-1,
                 )
-            if feature_name == "hepc_30":
+            elif feature_name == "hepc_30":
                 data_arr = np.concatenate(
                     [
                         f["hepc_sub_airflow_0"][:, :n_feat_ext],
@@ -275,30 +274,40 @@ def load_data_hdf5(
                 data_arr = f[feature_name][()]
             sqi_arr = f["sqi"][()]
 
-        fname_label = pd.read_hdf(fname, key="label")
-        label_arr = fname_label["description"].to_numpy()
-
-        # Removing low SQI data
-        data_arr_sqi = data_arr[sqi_arr >= sqi_thresh, :]
-        label_arr_sqi = label_arr[sqi_arr >= sqi_thresh]
-
-        # Removing nan data
-        data_arr_corr, label_arr_corr = drop_nan_rows(data_arr_sqi, label_arr_sqi)
-        label[fname] = label_arr_corr
+        # Replacing NaN and Inf values with 0
+        fname_label = load_process_pd_label(fname, sqi_arr)
+        data_arr_corr = replace_nan_inf_rows(data_arr)
+        label[fname] = fname_label
         data[fname] = data_arr_corr
 
     return data, label
 
 
-def load_data_pkl(
-    fnames_list: typing.List[str],
-    sqi_thresh: float,
-) -> typing.Tuple[dict, dict]:
+def load_process_pd_label(fname: str, sqi_arr: np.ndarray) -> pd.DataFrame:
+    fname_label = pd.read_hdf(fname, key="label")
+    events = fname_label["label"].apply(lambda x: convert_to_events(x))
+    fname_label["events"] = events.values
+    fname_label["sqi"] = sqi_arr
+    fname_label.reset_index(drop=True, inplace=True)
+    return fname_label
+
+
+def convert_to_events(row_data: str) -> list:
+    events_arr = [x for x in row_data.split(",") if "sleep stage" not in x]
+    return events_arr
+
+
+def load_data_pkl(fnames_list: typing.List[str]) -> typing.Tuple[dict, dict]:
     fnames_list_pkl = [x.replace(".hdf5", ".pkl") for x in fnames_list]
 
     data = {}
     label = {}
-    for fname_pkl, fname_hdf5 in zip(tqdm(fnames_list_pkl), fnames_list):
+    for idx, (fname_pkl, fname_hdf5) in enumerate(
+        zip(tqdm(fnames_list_pkl), fnames_list)
+    ):
+        if not os.path.exists(fname_pkl):
+            continue
+
         with open(fname_pkl, "rb") as f:
             data_arr = pickle.load(f)
 
@@ -313,17 +322,9 @@ def load_data_pkl(
 
             feat_arr.append(feat_arr_idx)
 
-        fname_label = pd.read_hdf(fname_hdf5, key="label")
-        label_arr = fname_label["description"].to_numpy()
-
-        feat_arr_sqi = []
-        for sqi, feat in zip(sqi_arr, feat_arr):
-            if sqi >= sqi_thresh:
-                feat_arr_sqi.append(feat)
-        label_arr_sqi = label_arr[sqi_arr >= sqi_thresh]
-
-        data[fname_hdf5] = feat_arr_sqi
-        label[fname_hdf5] = label_arr_sqi
+        fname_label = load_process_pd_label(fname_hdf5, sqi_arr)
+        data[fname_hdf5] = feat_arr
+        label[fname_hdf5] = fname_label
 
     return data, label
 
@@ -331,13 +332,12 @@ def load_data_pkl(
 def load_data(
     fnames_list: typing.List[str],
     feature_name: str,
-    sqi_thresh: float,
 ) -> typing.Tuple[dict, dict]:
     """Helper function to load data and labels from a list of files"""
     if feature_name in ["fapc"]:
-        data, label = load_data_pkl(fnames_list, sqi_thresh)
+        data, label = load_data_pkl(fnames_list)
     else:
-        data, label = load_data_hdf5(fnames_list, feature_name, sqi_thresh)
+        data, label = load_data_hdf5(fnames_list, feature_name)
     return data, label
 
 
