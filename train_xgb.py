@@ -20,13 +20,14 @@ def train(
     preproc_dir: str,
     data_dir: str,
     feature_name: str,
+    sqi_thresh: float = 0.25,
     filter_type: typing.Union[str, None] = None,
     calc_demos: bool = False,
     use_wandb: bool = False,
     wandb_project_name: str = "",
 ):
     if filter_type:
-        filters.check_filter_func(filter_type)
+        subject_filter = filters.FilterFunc(filter_type, data_dir)
 
     subject_fnames = [x for x in os.listdir(preproc_dir) if x.endswith(".hdf5")]
     subject_fnames = utils.get_unique_subjects(subject_fnames)
@@ -38,7 +39,6 @@ def train(
         all_paths,
         data_dir,
     )
-    sqi_thresh = 0.5
     print(f"SQI Threshold: {sqi_thresh}")
     all_data, all_label = utils.load_data(all_paths, feature_name)
 
@@ -48,11 +48,10 @@ def train(
 
     if filter_type:
         print(f"{len(all_paths)} Subjects before filtering")
-        all_data, all_label, all_paths = filters.filter_data(
+        all_data, all_label, all_paths = subject_filter(
             all_data,
             all_label,
             all_paths,
-            filter_type,
         )
         print(f"{len(all_paths)} Subjects after filtering")
     else:
